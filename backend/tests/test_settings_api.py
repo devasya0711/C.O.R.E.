@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated
 from uuid import UUID, uuid4
@@ -15,48 +14,16 @@ from app.core.auth import ClerkVerifier
 from app.core.config import Settings
 from app.core.rate_limit import enforce_rate_limit
 from app.core.security import TokenCipher
-from app.db.models import Base, Repository, User
-from app.db.session import create_database
+from app.db.models import Repository, User
 from app.main import create_app
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends
 from pydantic import SecretStr
-from sqlalchemy import event, select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from auth_helpers import ISSUER, jwks_response
-
-
-@pytest_asyncio.fixture
-async def sql_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    """Use PostgreSQL when supplied, otherwise explicitly portable SQLite."""
-    url = os.environ.get("TEST_DATABASE_URL")
-    engine, _ = create_database(url or "sqlite+aiosqlite:///:memory:")
-    if not url:
-
-        @event.listens_for(engine.sync_engine, "connect")
-        def sqlite_uuid(connection: object, record: object) -> None:
-            connection.create_function("gen_random_uuid", 0, lambda: uuid4().hex)  # type: ignore[attr-defined]
-
-    schema = f"settings_test_{uuid4().hex}"
-    try:
-        async with engine.connect() as connection:
-            if url:
-                await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-                await connection.execute(text(f'SET search_path TO "{schema}"'))
-            await connection.run_sync(Base.metadata.create_all)
-            await connection.commit()
-            yield async_sessionmaker(connection, expire_on_commit=False)
-            await connection.rollback()
-            if url:
-                await connection.execute(text("SET search_path TO public"))
-                await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-            else:
-                await connection.run_sync(Base.metadata.drop_all)
-            await connection.commit()
-    finally:
-        await engine.dispose()
 
 
 @pytest_asyncio.fixture

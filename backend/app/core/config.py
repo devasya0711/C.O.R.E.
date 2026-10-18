@@ -1,6 +1,7 @@
 """Typed application settings loaded from environment variables."""
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,6 +31,14 @@ class Settings(BaseSettings):
     clerk_authorized_parties: list[str] = Field(default_factory=list)
     encryption_secret_key: SecretStr | None = None
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    openai_api_key: SecretStr | None = None
+    embedding_model: str = "text-embedding-3-small"
+    embedding_timeout_seconds: float = Field(default=30, gt=0, le=90)
+    embedding_max_retries: int = Field(default=3, ge=0, le=3)
+    sample_monolith_path: Path = Path(__file__).resolve().parents[3] / "sample_monolith"
+    clone_timeout_seconds: float = Field(default=30, gt=0, le=300)
+    ingestion_timeout_seconds: float = Field(default=90, gt=0, le=240)
+    ingestion_max_source_bytes: int = Field(default=104857600, gt=0, le=104857600)
 
     @field_validator(
         "database_url",
@@ -40,6 +49,7 @@ class Settings(BaseSettings):
         "clerk_audience",
         "clerk_secret_key",
         "encryption_secret_key",
+        "openai_api_key",
         mode="before",
     )
     @classmethod

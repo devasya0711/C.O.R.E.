@@ -3,46 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import os
-from collections.abc import AsyncIterator
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 from app.core.errors import ApiError
 from app.core.rate_limit import SLIDING_WINDOW_SCRIPT, enforce_rate_limit, rate_bucket
 from app.db.models import User
 from app.db.neo4j import initialize_schema
-from app.db.redis import BLAST_RADIUS_TTL_SECONDS, create_redis_client
+from app.db.redis import BLAST_RADIUS_TTL_SECONDS
 from fastapi import FastAPI, Request
-from neo4j import AsyncDriver, AsyncGraphDatabase
+from neo4j import AsyncDriver
 from neo4j.exceptions import ConstraintError
 from redis.asyncio import Redis
-
-
-@pytest_asyncio.fixture
-async def redis_client() -> AsyncIterator[Redis]:
-    url = os.environ.get("TEST_REDIS_URL")
-    if not url:
-        pytest.skip("Real Redis tests require TEST_REDIS_URL")
-    client = create_redis_client(url)
-    try:
-        assert await client.ping()
-        yield client
-    finally:
-        await client.aclose()
-
-
-@pytest_asyncio.fixture
-async def neo4j_driver() -> AsyncIterator[AsyncDriver]:
-    uri = os.environ.get("TEST_NEO4J_URI")
-    if not uri:
-        pytest.skip("Real Neo4j tests require TEST_NEO4J_URI")
-    password = os.environ.get("TEST_NEO4J_PASSWORD")
-    auth = (os.environ.get("TEST_NEO4J_USER", "neo4j"), password) if password else None
-    async with AsyncGraphDatabase.driver(uri, auth=auth) as driver:
-        await driver.verify_connectivity()
-        yield driver
 
 
 @pytest.mark.parametrize(

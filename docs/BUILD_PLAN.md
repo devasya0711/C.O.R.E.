@@ -35,11 +35,12 @@ markers without blocking implementation:
    an invented route.
 3. **[APPROVAL REQUIRED-1] LLM provider.** No provider approval or secret was
    supplied in the workspace. OpenAI is the configurable primary default
-   (`gpt-4o` and `text-embedding-3-small`, as named by the PRD), with provider
-   interfaces and a deterministic offline path for tests and local graph
-   ingestion when `OPENAI_API_KEY` is absent. Production calls never embed a
-   key in source. Switching to Gemini is configuration work, not a schema
-   change.
+   (`gpt-4o` and `text-embedding-3-small`, as named by the PRD). Phase 3
+   supersedes this plan's original offline-ingestion assumption: absent
+   `OPENAI_API_KEY` produces an explicit `EMBEDDING_NOT_CONFIGURED` job failure,
+   never synthetic/hash vectors or silent provider substitution. Test-only HTTP
+   fixtures exercise the provider interface. Production code has a real OpenAI
+   client; a live key is still needed for live embedding verification.
 4. **FR-1 naming versus DATABASE.md.** FR-1 calls the concepts
    `API_Endpoint` and `DB_Table`; DATABASE.md is more specific and defines
    Neo4j labels `APIEndpoint` and `DBTable`. The database labels are canonical;
@@ -122,6 +123,37 @@ markers without blocking implementation:
     passwords/`DATABASE_URL`; Clerk secrets are runtime-only, never Docker
     build arguments. Test stores without auth are isolated local/CI fixtures,
     not production deployment defaults.
+22. **Exact graph relationship schema.** Only the node-label pairings listed
+    in DATABASE.md are emitted/validated. Module/class-initialization calls are
+    diagnostics, not File/Class `CALLS` edges. Nested definitions retain their
+    qualified names but use the containing File for `CONTAINS` where a Function
+    or Class-to-Class container edge would violate that schema. Tables retain
+    source metadata and read/write links, without invented `CONTAINS` edges.
+23. **Ingestion durability and retry.** A Redis Streams consumer group is the
+    worker queue; messages contain owner/repository/job UUIDs only. PostgreSQL
+    rows are committed before enqueueing. A retry after a Redis enqueue failure
+    republishes the existing QUEUED job; concurrent imports of the same
+    owner/source/branch are serialized with a PostgreSQL advisory lock. Pending
+    entries from a dead consumer are reclaimed after 300 seconds, beyond the
+    bounded ingestion timeout. Repository leases prevent simultaneous writers.
+24. **Progress contract.** No undocumented public SSE endpoint is added.
+    `GET /api/v1/repos` includes the latest `ingestion` job's stage, progress,
+    status, error, and timestamps for authorized polling. Redis retains a
+    bounded one-day progress event stream/pub-sub per repository/job; migration
+    SSE remains Phase 5's specified public streaming contract.
+25. **Static parser resource boundary.** The API runs only the installed,
+    trusted parser module in an isolated Python subprocess, with stripped
+    environment, 768 MiB address-space/30-second CPU limits, a 35-second wall
+    timeout, and bounded graph output. Target modules are never imported or
+    executed. Tree-sitter is pinned to 0.25.2-compatible releases because
+    0.26.0 crashed during source-location extraction in this environment.
+26. **Source and fixture boundaries.** GitHub HTTPS only; no URL credentials,
+    redirects, hooks, filters, submodules, symlinks, or arbitrary local paths.
+    Public clones and PAT acquisition share the same inert blob-export path.
+    The sample URL uses a deterministic source-content SHA (not a fabricated
+    Git commit). The fixture now imports real SQLAlchemy Table/Column types and
+    uses conventional `__tablename__` metadata on domain records instead of the
+    initial scaffold's SQLAlchemy-like marker classes.
 
 ## Batch sequence and acceptance criteria
 
@@ -260,8 +292,10 @@ commits.
 - [ ] Live Clerk sign-in/session refresh/sign-out requires a matching Clerk
   application and keys. Local tests verify real RSA JWT logic with generated
   keys and a test-only HTTP provider boundary; they are not live Clerk tests.
-- [ ] Push this batch and confirm its GitHub Actions results. The runner's SSH
-  identity is separate from the user's authenticated WSL session.
+- [x] Phase 2 commit `7e54424` is pushed: local `origin/main` was observed at
+  that commit before starting Phase 3.
+- [ ] GitHub Actions results still need authenticated remote verification.
+  The runner's SSH identity is separate from the user's WSL session.
 
 **Reproducing Phase 2 checks:** install `backend[dev]` in Python 3.12+, then
 run `ruff check backend sample_monolith`,
@@ -293,6 +327,85 @@ These are recorded gaps, not a clean final security/production verdict.
   on `sample_monolith`.
 - **Completion:** Ingesting `sample_monolith` populates Neo4j and returns a
   valid React Flow graph JSON payload.
+
+**Batch 3 implementation and verification:**
+
+- [x] Tree-sitter Python analyzer with deterministic source extents, docstrings,
+  import/receiver resolution, inheritance, route decorators, and SQLAlchemy/
+  literal SQL data dependencies. Ambiguous dynamic bindings produce bounded
+  diagnostics, not guessed call edges. Inputs are limited to 500 Python files
+  and 1 MiB per Python file; tests/dependencies/symlinks are excluded.
+- [x] Exact sample regression: **73 nodes** (6 File, 19 Class, 41 Function,
+  1 APIEndpoint, 6 DBTable) and **132 relationships** (60 CONTAINS, 39 CALLS,
+  21 READS_FROM, 11 WRITES_TO, 1 ROUTES_TO). Sample INHERITS count is zero;
+  synthetic inheritance fixtures verify that relationship. The chained
+  `orders.place_order -> payments.PaymentProcessor.execute` call is verified
+  at line 98. Unresolved/external definitions remain 83 explicit diagnostics.
+- [x] Secure source acquisition, temporary snapshot cleanup, immutable hashes,
+  Git credential handling, file/disk limits, subprocess timeout/cancellation,
+  and sample loading. A real public clone of `octocat/Hello-World` branch
+  `master` succeeded and its temporary directory was removed afterward.
+- [x] Actual OpenAI embedding HTTP client: configured model and 1536 dimensions,
+  tokenizer-bounded inputs/batches, validated response count/order/vectors,
+  30-second request deadlines and up to three backoff retries for transient
+  timeout/429/5xx failures. No production embedding fallback exists.
+- [x] Atomic tenant-scoped Neo4j batch upserts, stable IDs, stale-node/edge
+  cleanup, schema validation, and React Flow-compatible JSON with inspector
+  metadata and edge counts. Function vectors stay out of graph-view responses.
+- [x] Hybrid retrieval combines tenant-filtered cosine ranking with one-hop
+  structural neighbors. Neo4j 5 cannot prefilter its global vector top-k by
+  tenant; repository-scoped scoring avoids cross-tenant candidates and the
+  recall loss of filtering a global top-k after retrieval.
+- [x] Authenticated POST/list/graph repository APIs. Reposting the same source
+  reuses its repository namespace; completed/failed jobs get a new job, while
+  concurrent posts share a pending job. Graph access is denied until READY.
+- [x] Durable worker, dead-consumer recovery, atomic queue acknowledgement/
+  deletion, repository leases, persisted stage transitions, and failure codes.
+  Queue messages never contain PATs/source text. A competing lease never
+  acknowledges an unprocessed job. Missing provider configuration and AST
+  errors remain visible failures and do not fabricate a graph.
+- [x] Backend Docker setup includes Git/CA certificates and pre-caches the
+  tokenizer; Compose mounts the trusted sample read-only and forwards the
+  required ingestion settings. Store ports are bound to host loopback.
+- [x] Python 3.12.15: **284 passed, 2 intentional SQLite-only skips** in the
+  final 39.02-second run using real PostgreSQL 16.15, Neo4j 5.26.0, and Redis
+  7.0.15. This includes exact AST
+  regressions, all repository APIs, tenant isolation, concurrent requests,
+  queue outage/recovery, real Neo4j rollback/idempotency, and semantic isolation.
+- [x] Ruff lint/format passed (53 Python files); strict mypy passed (31 backend
+  application modules). Frontend typecheck, lint, 7 auth unit tests, production
+  build, and 3 production auth smoke tests passed. The first build attempt hit
+  the tool's four-minute timeout without a compiler error; rerunning the same
+  `npm run build` with a larger timeout succeeded without source/dependency
+  changes. The dependency lockfile is unchanged. No frontend UI source changed.
+- [x] Provider-fixture benchmark with actual SQL/Redis/Neo4j: 500 Python files
+  produced 1000 nodes/500 edges. Its test call took 2.24 seconds in the final
+  combined run; sample ingestion plus re-ingestion passed the under-30-second
+  assertion. These measurements exclude real OpenAI
+  network latency and are not a verified production performance SLA.
+- [x] Standalone Compose v2.39.4 `config --format json` validated all 5 services,
+  the read-only sample mount, and loopback-only store ports with ephemeral
+  credentials. No resolved credentials were printed or written into the repo.
+- [ ] A live OpenAI embedding call/private GitHub PAT clone requires credentials
+  not supplied to this runner. Provider HTTP behavior/credential containment
+  are tested at explicit test boundaries, not represented as live service tests.
+- [ ] ZIP upload remains the documented PRD/API contract gap (decision 2), not
+  a silently accepted or fake source type. Dynamic dispatch, wildcard imports,
+  complex SQL CTEs, and external definitions are explicit static-analysis
+  limitations with diagnostics/full-source context for CRAG.
+- [ ] Container build/cold boot requires a Docker daemon. Compose configuration
+  can be validated here, but native-store tests are not container boot proof.
+- [ ] Confirm this batch is pushed and verify its GitHub checks before Phase 4.
+
+**Reproducing Phase 3 checks:** use the Python 3.12+ setup and disposable
+`TEST_DATABASE_URL`, `TEST_REDIS_URL`, and `TEST_NEO4J_URI` configuration described
+in Batch 2. Run `ruff check backend sample_monolith`,
+`ruff format --check backend sample_monolith`,
+`mypy --strict --ignore-missing-imports backend/app`, and
+`PYTHONPATH=. python -m pytest sample_monolith backend/tests --durations=5 -q`
+from the root. In `frontend/`, run `npm run typecheck`, `npm run lint`,
+`npm test`, `npm run build`, and `npm run test:smoke`. The embedding provider
+fixture is explicitly test-only; these commands require no live OpenAI key.
 
 ### Batch 4 — Phase 4: Agent 2 & Agent 3 — Boundary Mapper & Blast Radius Predictor
 
@@ -413,8 +526,8 @@ These are recorded gaps, not a clean final security/production verdict.
 
 ### User stories
 
-- [ ] **US-1.1** Submit GitHub URL/branch and build an interactive Neo4j graph — **B3**
-- [ ] **US-1.2** Stream/show cloning, AST, embedding, and graph-index progress — **B3/B5/B6**
+- [ ] **US-1.1** Submit GitHub URL/branch and build an interactive Neo4j graph — **B3/B6**; B3 backend verified, interactive studio remains B6
+- [ ] **US-1.2** Stream/show cloning, AST, embedding, and graph-index progress — **B3/B5/B6**; B3 durable progress/polling verified, frontend/SSE work remains
 - [ ] **US-2.1** Run Louvain and inspect cohesive seam clusters — **B4/B6**
 - [ ] **US-2.2** Highlight cross-community `WRITES_TO`/`READS_FROM` shared tables — **B4/B6**
 - [ ] **US-3.1** Simulate a signature change and trace one-to-five-hop callers/routes — **B4/B6**
@@ -424,7 +537,7 @@ These are recorded gaps, not a clean final security/production verdict.
 
 ### Functional requirements
 
-- [ ] **FR-1 Static Analyzer:** Tree-sitter File/Class/Function/APIEndpoint/DBTable nodes, CALLS/INHERITS/READS_FROM/WRITES_TO edges, function embeddings — **B3**
+- [x] **FR-1 Static Analyzer:** Tree-sitter File/Class/Function/APIEndpoint/DBTable nodes, CALLS/INHERITS/READS_FROM/WRITES_TO edges, real embedding client — **B3**; live provider credential test remains
 - [ ] **FR-2 Boundary Mapper:** GDS Louvain with NetworkX fallback, cohesion/coupling, shared-table conflicts — **B4**
 - [ ] **FR-3 Impact Predictor:** bounded 1..5-hop Cypher, affected nodes/edges/routes, 0–100 risk — **B4**
 - [ ] **FR-4 CRAG Evaluator:** completeness checks, unresolved import/type detection, full-file AST fallback — **B5**
@@ -435,15 +548,15 @@ These are recorded gaps, not a clean final security/production verdict.
 
 - [ ] **Performance:** ≤500 ms five-hop graph query at 10,000 nodes and ≤90 s ingestion for 500 files — **B4/B7/B13**
 - [ ] **Security:** Clerk JWT on API routes, AES-256/Fernet token encryption, parameterized Cypher, no-network isolated sandbox — **B2/B5/B9**
-- [ ] **Reliability:** idempotent re-ingestion updates existing nodes without duplicates — **B3/B7/B13**
+- [x] **Reliability:** idempotent re-ingestion updates existing nodes without duplicates — **B3** real-store verification; re-audit in **B7/B13**
 
 ### API contract
 
 - [x] **GET `/api/v1/health`** real connectivity and failure checks — **B1/B2**; exact monitoring fields remain **B12**
 - [x] **PUT `/api/v1/settings/github-token`** encrypted PAT storage — **B2** (decision 19 notes the Fernet/AES wording conflict)
-- [ ] **POST `/api/v1/repos`** register/trigger URL or sample ingestion, 202 — **B3**
-- [ ] **GET `/api/v1/repos`** list authenticated owner's repositories — **B3**
-- [ ] **GET `/api/v1/repos/{repo_id}/graph`** React Flow nodes/edges with community/shared-table data — **B3/B4**
+- [x] **POST `/api/v1/repos`** register/trigger URL or sample ingestion, 202 — **B3**
+- [x] **GET `/api/v1/repos`** list authenticated owner's repositories — **B3**
+- [x] **GET `/api/v1/repos/{repo_id}/graph`** React Flow nodes/edges with community/shared-table fields — **B3**; computed community/shared-table values remain **B4**
 - [ ] **POST `/api/v1/repos/{repo_id}/seams/analyze`** deterministic seam analysis — **B4**
 - [ ] **POST `/api/v1/repos/{repo_id}/impact`** bounded impact request and risk response — **B4**
 - [ ] **POST `/api/v1/repos/{repo_id}/migrations`** queue LangGraph migration, 202 — **B5**
@@ -455,18 +568,18 @@ These are recorded gaps, not a clean final security/production verdict.
 
 ### Neo4j graph schema
 
-- [ ] Base `CodeNode` label with tenant `repo_id` and required source/location properties — **B3**
-- [ ] `File` node label — **B3**
-- [ ] `Class` node label — **B3**
-- [ ] `Function` node label with 1536-dimensional embedding index — **B2/B3**
-- [ ] `APIEndpoint` node label — **B3**
-- [ ] `DBTable` node label — **B3**
-- [ ] `CONTAINS` File→Class/Function and Class→Function — **B3**
-- [ ] `CALLS {line}` Function→Function — **B3**
-- [ ] `INHERITS` Class→Class — **B3**
-- [ ] `READS_FROM` Function→DBTable — **B3**
-- [ ] `WRITES_TO` Function→DBTable — **B3**
-- [ ] `ROUTES_TO` APIEndpoint→Function — **B3**
+- [x] Base `CodeNode` label with tenant `repo_id` and required source/location properties — **B3**
+- [x] `File` node label — **B3**
+- [x] `Class` node label — **B3**
+- [x] `Function` node label with 1536-dimensional embedding index — **B2/B3**
+- [x] `APIEndpoint` node label — **B3**
+- [x] `DBTable` node label — **B3**
+- [x] `CONTAINS` File→Class/Function and Class→Function — **B3**
+- [x] `CALLS {line}` Function→Function — **B3**
+- [x] `INHERITS` Class→Class — **B3**
+- [x] `READS_FROM` Function→DBTable — **B3**
+- [x] `WRITES_TO` Function→DBTable — **B3**
+- [x] `ROUTES_TO` APIEndpoint→Function — **B3**
 - [x] Unique `code_node_id_unique`, repo/qname indexes, and vector `function_embedding_idx` — **B2**
 
 ### Required environment variables
@@ -481,14 +594,14 @@ These are recorded gaps, not a clean final security/production verdict.
 - [x] `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` — **B1/B2**; live credentials still needed
 - [x] `CLERK_SECRET_KEY` — **B2**; runtime-only
 - [x] `CLERK_JWKS_URL` — **B2**
-- [ ] `OPENAI_API_KEY` — **B5**
+- [x] `OPENAI_API_KEY` — **B3/B5**; typed runtime secret, missing-key failure tested; live key not supplied
 - [x] `ENCRYPTION_SECRET_KEY` — **B2**; no key generated into tracked files
 
 ## Batch status
 
-- [ ] B1 — Phase 1
-- [ ] B2 — Phase 2
-- [ ] B3 — Phase 3
+- [ ] B1 — Phase 1 implementation pushed; Docker cold boot still unverified
+- [ ] B2 — Phase 2 implementation/tests pushed; live Clerk/remote CI unverified
+- [ ] B3 — Phase 3 implementation/local verification done; push confirmation pending, live provider/Docker gaps above
 - [ ] B4 — Phase 4
 - [ ] B5 — Phase 5
 - [ ] B6 — Phase 6

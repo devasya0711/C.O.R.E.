@@ -1,4 +1,4 @@
-"""Domain objects and SQLAlchemy-like schema declarations for the fixture.
+"""Domain objects and SQLAlchemy schema declarations for the fixture.
 
 The fixture deliberately keeps persistence in memory so it can run without a
 database service.  The table declarations retain the shape of a relational
@@ -11,63 +11,18 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+from typing import ClassVar
 
-
-class Integer:
-    """Marker type matching an integer database column."""
-
-
-class String:
-    """Marker type matching a string database column."""
-
-
-class Numeric:
-    """Marker type matching a decimal database column."""
-
-
-class Boolean:
-    """Marker type matching a boolean database column."""
-
-
-class DateTime:
-    """Marker type matching a timestamp database column."""
-
-
-class Column:
-    """Small schema object with the subset needed by the static fixture."""
-
-    def __init__(
-        self,
-        name: str,
-        column_type: type[object],
-        *,
-        primary_key: bool = False,
-        nullable: bool = True,
-    ) -> None:
-        self.name = name
-        self.column_type = column_type
-        self.primary_key = primary_key
-        self.nullable = nullable
-
-
-class MetaData:
-    """Registry for SQLAlchemy-like table declarations."""
-
-    def __init__(self) -> None:
-        self.tables: dict[str, Table] = {}
-
-    def register(self, table: Table) -> None:
-        self.tables[table.name] = table
-
-
-class Table:
-    """Static table definition that does not open a database connection."""
-
-    def __init__(self, name: str, metadata: MetaData, *columns: Column) -> None:
-        self.name = name
-        self.columns = {column.name: column for column in columns}
-        metadata.register(self)
-
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    MetaData,
+    Numeric,
+    String,
+    Table,
+)
 
 metadata = MetaData()
 
@@ -143,6 +98,8 @@ class PaymentStatus(str, Enum):
 class User:
     """Authenticated customer record."""
 
+    __tablename__: ClassVar[str] = "users"
+
     id: str
     email: str
     is_active: bool = True
@@ -151,6 +108,8 @@ class User:
 @dataclass
 class Product:
     """Product catalog record with its current available stock."""
+
+    __tablename__: ClassVar[str] = "products"
 
     id: str
     sku: str
@@ -171,6 +130,8 @@ class CartItem:
 class OrderLine:
     """Snapshot of a product included in an order."""
 
+    __tablename__: ClassVar[str] = "order_items"
+
     product_id: str
     product_name: str
     quantity: int
@@ -187,6 +148,8 @@ class OrderLine:
 class Order:
     """Order aggregate persisted by the in-memory database."""
 
+    __tablename__: ClassVar[str] = "orders"
+
     id: str
     user_id: str
     lines: tuple[OrderLine, ...]
@@ -198,6 +161,8 @@ class Order:
 @dataclass(frozen=True)
 class PaymentTransaction:
     """Payment ledger row produced by the offline payment processor."""
+
+    __tablename__: ClassVar[str] = "ledger_entries"
 
     id: str
     order_id: str

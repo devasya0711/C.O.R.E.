@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.health import router as health_router
+from app.api.v1.repos import router as repos_router
 from app.api.v1.settings import router as settings_router
 from app.core.auth import ClerkVerifier, get_current_user
 from app.core.config import Settings, get_settings
@@ -18,6 +19,10 @@ from app.core.rate_limit import enforce_rate_limit
 from app.db.neo4j import create_neo4j_driver, initialize_schema
 from app.db.redis import create_redis_client
 from app.db.session import create_database
+from app.services.embedding_service import EmbeddingService
+from app.services.ingestion_service import IngestionService
+from app.services.neo4j_service import Neo4jService
+from app.services.repository_source import RepositorySource
 
 
 @asynccontextmanager
@@ -44,6 +49,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if driver:
             stack.push_async_callback(driver.close)
             await initialize_schema(driver)
+        app.state.ingestion = None
+        if (
+            driver
+            and app.state.redis is not None
+            and app.state.session_factory is not None
+        ):
+            service = IngestionService(
+                app.state.session_factory,
+                app.state.redis,
+                Neo4jService(driver),
+                RepositorySource(
+                    settings.sample_monolith_path,
+                    settings.clone_timeout_seconds,
+                    settings.ingestion_max_source_bytes,
+                ),
+                EmbeddingService(
+                    client,
+                    settings.openai_api_key,
+                    model=settings.embedding_model,
+                    timeout_seconds=settings.embedding_timeout_seconds,
+                    max_retries=settings.embedding_max_retries,
+                ),
+                settings,
+            )
+            await service.start()
+            stack.push_async_callback(service.close)
+            app.state.ingestion = service
         yield
 
 
@@ -74,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dependencies=[Depends(get_current_user), Depends(enforce_rate_limit)],
     )
     protected.include_router(settings_router)
+    protected.include_router(repos_router)
     application.include_router(protected)
     return application
 

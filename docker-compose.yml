@@ -8,7 +8,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -26,8 +26,8 @@ services:
       - neo4j_data:/data
       - neo4j_logs:/logs
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
       interval: 10s
@@ -40,7 +40,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -65,6 +65,16 @@ services:
       CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000"]}'
       ENVIRONMENT: ${ENVIRONMENT:-development}
       HEALTH_PROBE_TIMEOUT_SECONDS: ${HEALTH_PROBE_TIMEOUT_SECONDS:-1.5}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-30}
+      EMBEDDING_MAX_RETRIES: ${EMBEDDING_MAX_RETRIES:-3}
+      SAMPLE_MONOLITH_PATH: /sample_monolith
+      CLONE_TIMEOUT_SECONDS: ${CLONE_TIMEOUT_SECONDS:-30}
+      INGESTION_TIMEOUT_SECONDS: ${INGESTION_TIMEOUT_SECONDS:-90}
+      INGESTION_MAX_SOURCE_BYTES: ${INGESTION_MAX_SOURCE_BYTES:-104857600}
+    volumes:
+      - ./sample_monolith:/sample_monolith:ro
     depends_on:
       postgres:
         condition: service_healthy
