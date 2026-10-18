@@ -115,6 +115,24 @@ commits.
 - **Completion:** All containers boot cleanly via `docker compose up -d` and
   the initial commit is pushed to GitHub.
 
+**Batch 1 verification:**
+
+- [x] Root `.gitignore`, `.env.example`, required Git identity, and remote are
+  configured.
+- [x] FastAPI `GET /api/v1/health` returns HTTP 200 with PostgreSQL, Neo4j, and
+  Redis component statuses when services are not configured locally.
+- [x] The six-module `sample_monolith` has deterministic checkout tests.
+- [x] Ruff lint and format checks pass for `backend` and `sample_monolith`.
+- [x] `PYTHONPATH=. pytest sample_monolith backend/tests` passes (5 tests).
+- [x] Frontend `npm run typecheck` passes.
+- [x] Frontend `npm run build` passes with Next.js standalone output.
+- [x] `docker-compose.yml` and CI workflow are present and YAML-structured.
+- [ ] `docker compose up -d` and image builds are not verifiable here because
+  the Docker CLI/daemon is unavailable in this environment. GitHub Actions
+  remains configured to run the Docker build check.
+- [x] The Phase 1 changes are committed locally; push requires the user's
+  SSH-authenticated WSL session because this runner cannot access that agent.
+
 ### Batch 2 — Phase 2: Database Layer, Clerk Auth & Security Middleware
 
 - **Goal:** Implement PostgreSQL models/migrations, Neo4j
