@@ -7,12 +7,13 @@ from collections.abc import Awaitable, Callable
 from typing import Literal
 
 import asyncpg
-import redis.asyncio as redis
 from fastapi import APIRouter, Request
 from neo4j import AsyncGraphDatabase
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings
+from app.core.errors import ApiError
+from app.db.redis import create_redis_client
 
 router = APIRouter(tags=["system"])
 
@@ -85,13 +86,19 @@ async def _probe_postgres(settings: Settings) -> ComponentHealth:
 async def _probe_neo4j(settings: Settings) -> ComponentHealth:
     """Verify Neo4j connectivity and close the short-lived driver."""
 
-    if not settings.neo4j_uri or not settings.neo4j_user or not settings.neo4j_password:
+    uri, user, password = (
+        settings.neo4j_uri,
+        settings.neo4j_user,
+        settings.neo4j_password,
+    )
+    if not uri or not user or not password:
         return ComponentHealth(status="not_configured")
+    secret = password.get_secret_value()
 
     async def operation() -> None:
         driver = AsyncGraphDatabase.driver(
-            settings.neo4j_uri,
-            auth=(settings.neo4j_user, settings.neo4j_password),
+            uri,
+            auth=(user, secret),
         )
         try:
             await driver.verify_connectivity()
@@ -104,15 +111,12 @@ async def _probe_neo4j(settings: Settings) -> ComponentHealth:
 async def _probe_redis(settings: Settings) -> ComponentHealth:
     """Send a Redis PING and close the async client."""
 
-    if not settings.redis_url:
+    url = settings.redis_url
+    if not url:
         return ComponentHealth(status="not_configured")
 
     async def operation() -> None:
-        client = redis.from_url(
-            settings.redis_url,
-            socket_connect_timeout=settings.health_probe_timeout_seconds,
-            socket_timeout=settings.health_probe_timeout_seconds,
-        )
+        client = create_redis_client(url)
         try:
             await client.ping()
         finally:
@@ -123,7 +127,7 @@ async def _probe_redis(settings: Settings) -> ComponentHealth:
 
 @router.get("/health", response_model=HealthResponse)
 async def health(request: Request) -> HealthResponse:
-    """Return dependency status without requiring authentication in Phase 1."""
+    """Probe critical stores without requiring authentication or exposing URLs."""
 
     settings: Settings = request.app.state.settings
     postgres, neo4j, redis_status = await asyncio.gather(
@@ -136,7 +140,18 @@ async def health(request: Request) -> HealthResponse:
         "neo4j": neo4j,
         "redis": redis_status,
     }
-    healthy = all(component.status != "unhealthy" for component in components.values())
+    healthy = all(component.status == "healthy" for component in components.values())
+    if not healthy:
+        raise ApiError(
+            503,
+            "SERVICE_UNAVAILABLE",
+            "One or more critical stores are unavailable.",
+            {
+                "components": {
+                    key: value.model_dump() for key, value in components.items()
+                }
+            },
+        )
     return HealthResponse(
         status="ok" if healthy else "degraded",
         version="0.1.0",

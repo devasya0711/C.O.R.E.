@@ -92,6 +92,36 @@ markers without blocking implementation:
     service, Dockerfile, Strangler Fig proxy, and adapter outputs. It does not
     add database data migration automation because PRD explicitly places that
     out of scope.
+16. **Phase 2 identity provisioning.** Clerk's default session JWT does not
+    necessarily contain an email. Verified subjects are looked up by
+    `users.clerk_id`; new subjects use a signed custom `email` claim when
+    present, otherwise the primary email is fetched from Clerk's Backend API
+    using runtime `CLERK_SECRET_KEY`. No synthetic emails or email-based account
+    linking are used. JWT verification pins RS256, issuer, required timestamps,
+    and optionally audience/authorized parties.
+17. **GitHub token settings payload.** API.md specifies the PUT path but no
+    JSON field or success body. Phase 2 uses `{ "token": "..." }` and returns
+    HTTP 200 `{ "status": "saved" }`, never plaintext or ciphertext.
+18. **Ownership denial.** Prompt 11 explicitly requires cross-tenant HTTP 403.
+    The shared ownership dependency queries both repository ID and verified
+    owner ID and returns the same 403 for foreign and nonexistent IDs to avoid
+    leaking existence. It does not perform an unscoped existence query.
+19. **Fernet versus AES-256 wording.** The explicit library/key requirement is
+    followed: `cryptography.fernet.Fernet` with a base64-encoded 32-byte key.
+    Fernet actually uses AES-128-CBC plus HMAC-SHA256, not AES-256. This
+    specification conflict is recorded rather than falsely advertising
+    AES-256 or replacing the named encryption primitive.
+20. **Authenticated rate-limit ordering.** The Redis Lua sliding-window guard
+    is installed as a protected-router dependency after `get_current_user`,
+    rather than unauthenticated IP/header-based ASGI middleware. This enforces
+    the specified 60/min and 10/min budgets using the verified internal user
+    ID, and fails closed if Redis is unavailable.
+21. **Configuration is not a live credential.** Empty external-credential
+    values in `.env.example` remain unconfigured. Neither frontend nor API
+    bypasses auth when Clerk is absent. Compose requires user-supplied store
+    passwords/`DATABASE_URL`; Clerk secrets are runtime-only, never Docker
+    build arguments. Test stores without auth are isolated local/CI fixtures,
+    not production deployment defaults.
 
 ## Batch sequence and acceptance criteria
 
@@ -180,6 +210,74 @@ commits.
   constraint verification, and Redis connectivity.
 - **Completion:** Protected API routes enforce Clerk auth and migrations apply
   cleanly.
+
+**Batch 2 implementation and verification:**
+
+- [x] Exact `users`, `repositories`, `seam_clusters`, and `migration_jobs`
+  PostgreSQL models plus `ingestion_jobs` (decision 6); async sessions, native
+  UUID/JSONB/timestamptz defaults, cascade deletion, and value constraints.
+- [x] Alembic revision `0001_postgresql`, async online upgrade/downgrade,
+  offline SQL, and migration/model agreement. Docker startup runs
+  `alembic upgrade head` before starting Uvicorn.
+- [x] Neo4j async driver and idempotent startup uniqueness/repo/qname/vector
+  index creation. Real Neo4j checks verify uniqueness enforcement and the
+  1536-dimensional cosine vector index.
+- [x] Async Clerk JWKS verification, safe provisioning, common ownership guard,
+  401/403 tests, and encrypted token settings endpoint.
+- [x] Fernet encryption/decryption/tamper tests; request schemas reject invalid
+  tokens and error responses omit sensitive input values.
+- [x] Real Redis atomic sliding-window tests: exactly ten of 25 concurrent
+  job requests admitted, 60-request graph limit, user isolation, window expiry,
+  retry headers, cache TTL, and pub/sub. Store outages fail closed.
+- [x] Strict CORS configuration, standard API error envelopes, optional-secret
+  normalization, and request-scoped transaction cleanup.
+- [x] Clerk frontend middleware, styled catch-all sign-in/sign-up pages,
+  dynamic provider/account controls, and production fail-closed route tests.
+  The landing page now labels its diagram as an architecture preview, not a
+  live operational status report.
+- [x] Backend package now requires Python 3.12+ as specified.
+- [x] Python 3.12.15: **145 passed, 2 intentional skips**, with live PostgreSQL
+  16.15, Neo4j 5.26.0, and Redis 7.0.15. The skips are the SQLite variants of
+  PostgreSQL-only native-type/VARCHAR checks; their PostgreSQL variants pass.
+- [x] Ruff lint/format checks pass for all backend/sample files. Strict mypy
+  (`--ignore-missing-imports`) passes for all 20 backend application modules.
+- [x] Fresh frontend snapshot: `npm ci`, `npm run typecheck`, `npm run lint`,
+  `npm test` (**7 passed**), `npm run build`, and `npm run test:smoke`
+  (**3 passed**). The lockfile remains unchanged.
+  An earlier direct workspace build exceeded the 300-second tool timeout;
+  the fresh snapshot completed the same build and all checks without disabling
+  lint/type validation. The timed-out invocation is not counted as a pass.
+- [x] Real app lifespan/HTTP smoke: Neo4j schema initialization succeeds,
+  `/api/v1/health` returns 200 with all three native stores healthy, and
+  unauthenticated token settings return 401. Missing stores now correctly
+  return 503 instead of the initial scaffold's misleading aggregate `ok`.
+- [x] Docker Compose v2.39.4 `config --format json` validates all five services
+  with ephemeral credentials, without printing them. CI now provisions all
+  three real test stores and runs frontend auth tests/build/smoke checks.
+- [ ] Container image builds/cold boot still require a Docker daemon, which is
+  unavailable in this runner. Native-service verification above is not claimed
+  as container boot verification.
+- [ ] Live Clerk sign-in/session refresh/sign-out requires a matching Clerk
+  application and keys. Local tests verify real RSA JWT logic with generated
+  keys and a test-only HTTP provider boundary; they are not live Clerk tests.
+- [ ] Push this batch and confirm its GitHub Actions results. The runner's SSH
+  identity is separate from the user's authenticated WSL session.
+
+**Reproducing Phase 2 checks:** install `backend[dev]` in Python 3.12+, then
+run `ruff check backend sample_monolith`,
+`ruff format --check backend sample_monolith`, and
+`PYTHONPATH=. python -m pytest sample_monolith backend/tests` from the root.
+Set `TEST_DATABASE_URL` to a disposable PostgreSQL 16 database with schema
+creation privileges, `TEST_REDIS_URL` to a disposable Redis 7 database, and
+`TEST_NEO4J_URI` (plus `TEST_NEO4J_USER`/`TEST_NEO4J_PASSWORD` if needed) to a
+Neo4j 5 instance to enable all real-store cases. Without these variables,
+integration cases are explicitly skipped, never substituted with fake stores.
+Tests isolate/drop their own generated schemas/nodes/keys, not existing data.
+
+Remaining warnings: upstream Starlette/httpx deprecation; Clerk 7's
+`createRouteMatcher` deprecation (Phase 6 data-bearing pages must additionally
+protect resources server-side); and the 11 previously reported npm advisories.
+These are recorded gaps, not a clean final security/production verdict.
 
 ### Batch 3 — Phase 3: Agent 1 — Tree-Sitter AST Parser & Hybrid GraphRAG Ingestion
 
@@ -341,8 +439,8 @@ commits.
 
 ### API contract
 
-- [ ] **GET `/api/v1/health`** connectivity check — **B1**, enhanced 503/latencies **B12**
-- [ ] **PUT `/api/v1/settings/github-token`** encrypted PAT storage — **B2**
+- [x] **GET `/api/v1/health`** real connectivity and failure checks — **B1/B2**; exact monitoring fields remain **B12**
+- [x] **PUT `/api/v1/settings/github-token`** encrypted PAT storage — **B2** (decision 19 notes the Fernet/AES wording conflict)
 - [ ] **POST `/api/v1/repos`** register/trigger URL or sample ingestion, 202 — **B3**
 - [ ] **GET `/api/v1/repos`** list authenticated owner's repositories — **B3**
 - [ ] **GET `/api/v1/repos/{repo_id}/graph`** React Flow nodes/edges with community/shared-table data — **B3/B4**
@@ -351,8 +449,8 @@ commits.
 - [ ] **POST `/api/v1/repos/{repo_id}/migrations`** queue LangGraph migration, 202 — **B5**
 - [ ] **GET `/api/v1/repos/{repo_id}/migrations/{job_id}/stream`** SSE state events — **B5**
 - [ ] **POST `/api/v1/repos/{repo_id}/migrations/{job_id}/pr`** manual PR creation — **B5**
-- [ ] Standard `{error: {code, message, details}}` failures and ownership-safe 404/403 behavior — **B2/B7/B9**
-- [ ] Redis sliding windows: 60/min graph/read and 10/min ingestion/migration per user — **B2/B9**
+- [x] Standard `{error: {code, message, details}}` failures and ownership-safe 403 behavior — **B2**; re-audit in **B7/B9**
+- [x] Redis sliding windows: 60/min graph/read and 10/min ingestion/migration per user — **B2**; re-audit in **B9**
 - [ ] External resilience: LLM backoff max three, structured output, GitHub 15-second timeout — **B5/B9**
 
 ### Neo4j graph schema
@@ -369,22 +467,22 @@ commits.
 - [ ] `READS_FROM` Function→DBTable — **B3**
 - [ ] `WRITES_TO` Function→DBTable — **B3**
 - [ ] `ROUTES_TO` APIEndpoint→Function — **B3**
-- [ ] Unique `code_node_id_unique`, repo/qname indexes, and vector `function_embedding_idx` — **B2**
+- [x] Unique `code_node_id_unique`, repo/qname indexes, and vector `function_embedding_idx` — **B2**
 
 ### Required environment variables
 
-- [ ] `GIT_AUTHOR_NAME` — **B1**
-- [ ] `GIT_AUTHOR_EMAIL` — **B1**
-- [ ] `DATABASE_URL` — **B1/B2**
-- [ ] `NEO4J_URI` — **B1/B2**
-- [ ] `NEO4J_USER` — **B1/B2**
-- [ ] `NEO4J_PASSWORD` — **B1/B2**
-- [ ] `REDIS_URL` — **B1/B2**
-- [ ] `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` — **B1/B2/B6**
-- [ ] `CLERK_SECRET_KEY` — **B2**
-- [ ] `CLERK_JWKS_URL` — **B2**
+- [x] `GIT_AUTHOR_NAME` — **B1**
+- [x] `GIT_AUTHOR_EMAIL` — **B1**
+- [x] `DATABASE_URL` — **B1/B2**
+- [x] `NEO4J_URI` — **B1/B2**
+- [x] `NEO4J_USER` — **B1/B2**
+- [x] `NEO4J_PASSWORD` — **B1/B2**
+- [x] `REDIS_URL` — **B1/B2**
+- [x] `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` — **B1/B2**; live credentials still needed
+- [x] `CLERK_SECRET_KEY` — **B2**; runtime-only
+- [x] `CLERK_JWKS_URL` — **B2**
 - [ ] `OPENAI_API_KEY` — **B5**
-- [ ] `ENCRYPTION_SECRET_KEY` — **B2**
+- [x] `ENCRYPTION_SECRET_KEY` — **B2**; no key generated into tracked files
 
 ## Batch status
 

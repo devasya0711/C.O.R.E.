@@ -8,6 +8,38 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: core_test
+          POSTGRES_DB: core_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U core_test -d core_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 127.0.0.1:6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+      neo4j:
+        image: neo4j:5.26-community
+        env:
+          NEO4J_AUTH: none
+        ports:
+          - 127.0.0.1:7687:7687
+        options: >-
+          --health-cmd "wget --quiet --spider http://localhost:7474"
+          --health-interval 10s --health-timeout 5s --health-retries 18
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://core_test@127.0.0.1:5432/core_test
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
+      TEST_NEO4J_URI: bolt://127.0.0.1:7687
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -16,7 +48,9 @@ jobs:
       - name: Install backend and test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -e "backend[dev]"
       - name: Ruff
-        run: ruff check backend sample_monolith
+        run: ruff check backend sample_monolith && ruff format --check backend sample_monolith
+      - name: Backend typecheck
+        run: mypy --strict --ignore-missing-imports backend/app
       - name: Pytest
         run: PYTHONPATH=. pytest sample_monolith backend/tests
 
@@ -35,9 +69,15 @@ jobs:
       - name: TypeScript
         working-directory: frontend
         run: npm run typecheck
+      - name: Frontend lint and auth unit tests
+        working-directory: frontend
+        run: npm run lint && npm test
       - name: Production build
         working-directory: frontend
         run: npm run build
+      - name: Production auth smoke tests
+        working-directory: frontend
+        run: npm run test:smoke
       - name: Verify build did not modify dependency lockfile
         run: git diff --exit-code -- frontend/package-lock.json
 
@@ -47,4 +87,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build application images
-        run: docker compose build backend frontend
+        run: docker build -t core-backend:ci backend && docker build -t core-frontend:ci frontend

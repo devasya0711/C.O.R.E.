@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-core_db}
       POSTGRES_USER: ${POSTGRES_USER:-core_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-core_pass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -18,7 +18,7 @@ services:
   neo4j:
     image: neo4j:5.26-community
     environment:
-      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-core_neo4j_pass}
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}
       NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
       NEO4J_dbms_security_procedures_unrestricted: apoc.*,gds.*
       NEO4J_dbms_security_procedures_allowlist: apoc.*,gds.*
@@ -51,12 +51,20 @@ services:
     build:
       context: ./backend
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-core_user}:${POSTGRES_PASSWORD:-core_pass}@postgres:5432/${POSTGRES_DB:-core_db}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: ${NEO4J_USER:-neo4j}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-core_neo4j_pass}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}
       REDIS_URL: redis://redis:6379/0
-      ENVIRONMENT: development
+      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      CLERK_ISSUER: ${CLERK_ISSUER:-}
+      CLERK_AUDIENCE: ${CLERK_AUDIENCE:-}
+      CLERK_AUTHORIZED_PARTIES: '${CLERK_AUTHORIZED_PARTIES:-["http://localhost:3000"]}'
+      ENCRYPTION_SECRET_KEY: ${ENCRYPTION_SECRET_KEY:-}
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000"]}'
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      HEALTH_PROBE_TIMEOUT_SECONDS: ${HEALTH_PROBE_TIMEOUT_SECONDS:-1.5}
     depends_on:
       postgres:
         condition: service_healthy
@@ -81,8 +89,16 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+        NEXT_PUBLIC_CLERK_SIGN_IN_URL: ${NEXT_PUBLIC_CLERK_SIGN_IN_URL:-/sign-in}
+        NEXT_PUBLIC_CLERK_SIGN_UP_URL: ${NEXT_PUBLIC_CLERK_SIGN_UP_URL:-/sign-up}
+        NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: ${NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL:-/}
+        NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: ${NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL:-/}
+        NEXT_PUBLIC_CLERK_AFTER_SIGN_OUT_URL: ${NEXT_PUBLIC_CLERK_AFTER_SIGN_OUT_URL:-/}
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
     depends_on:
       backend:
         condition: service_healthy

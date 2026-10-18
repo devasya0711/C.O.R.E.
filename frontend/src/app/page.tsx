@@ -1,7 +1,11 @@
-const systemSignals = [
-  { label: "AST PARSER", value: "READY", tone: "text-emerald-400" },
-  { label: "GRAPH STORE", value: "STANDBY", tone: "text-amber-400" },
-  { label: "CRAG SANDBOX", value: "ISOLATED", tone: "text-blue-400" },
+import Link from "next/link";
+
+import { AccountNavigation } from "@/components/auth/account-navigation";
+
+const architectureComponents = [
+  { label: "AST PARSING", technology: "Tree-sitter" },
+  { label: "GRAPH STORE", technology: "Neo4j" },
+  { label: "CRAG VERIFICATION", technology: "pytest sandbox" },
 ];
 
 export default function HomePage() {
@@ -18,9 +22,7 @@ export default function HomePage() {
               <p className="font-mono text-[10px] tracking-[0.16em] text-mutedText">GRAPH REFACTORING SYSTEM</p>
             </div>
           </div>
-          <span className="rounded-md border border-hairline bg-panel px-3 py-2 font-mono text-xs text-secondaryText">
-            v0.1 / LOCAL
-          </span>
+          <AccountNavigation />
         </header>
 
         <section className="grid flex-1 items-center gap-14 py-16 lg:grid-cols-[1.15fr_0.85fr]">
@@ -32,41 +34,40 @@ export default function HomePage() {
               Make monolith boundaries visible before you move them.
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-7 text-secondaryText">
-              C.O.R.E. builds a deterministic dependency graph, measures seam
-              cohesion, predicts blast radius, and verifies extracted services
+              C.O.R.E. is being built to map deterministic dependencies, measure
+              seam cohesion, predict blast radius, and verify extracted services
               before a pull request is opened.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <a
-                href="/dashboard"
+              <Link
+                href="/sign-in"
                 className="rounded-md bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500"
               >
-                Open workspace
-              </a>
+                Sign in
+              </Link>
               <span className="rounded-md border border-hairline bg-panel px-5 py-3 font-mono text-xs text-secondaryText">
-                sample_monolith included
+                Workspace studio in development
               </span>
             </div>
           </div>
 
           <div className="rounded-lg border border-hairline bg-panel p-5 shadow-2xl shadow-black/20">
             <div className="mb-6 flex items-center justify-between border-b border-hairline pb-4">
-              <span className="font-mono text-xs text-secondaryText">SYSTEM SIGNALS</span>
-              <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_12px_#22c55e]" />
+              <span className="font-mono text-xs text-secondaryText">ARCHITECTURE PREVIEW</span>
+              <span className="font-mono text-xs text-secondaryText">STATIC</span>
             </div>
             <div className="space-y-3">
-              {systemSignals.map((signal) => (
-                <div key={signal.label} className="flex items-center justify-between rounded-md border border-hairline bg-surface px-4 py-3">
-                  <span className="font-mono text-xs text-mutedText">{signal.label}</span>
-                  <span className={`font-mono text-xs font-semibold ${signal.tone}`}>{signal.value}</span>
+              {architectureComponents.map((component) => (
+                <div key={component.label} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-hairline bg-surface px-4 py-3">
+                  <span className="font-mono text-xs text-secondaryText">{component.label}</span>
+                  <span className="font-mono text-xs font-semibold text-primaryText">{component.technology}</span>
                 </div>
               ))}
             </div>
             <div className="mt-6 rounded-md border border-dashed border-hairline p-4">
-              <p className="font-mono text-[11px] leading-5 text-mutedText">
-                // ingest a repository to initialize the topology workspace
-                <br />
-                // all graph operations remain tenant-scoped
+              <p className="font-mono text-xs leading-5 text-secondaryText">
+                Planned system components. This preview does not report service
+                health, connectivity, or execution status.
               </p>
             </div>
           </div>
@@ -76,7 +77,7 @@ export default function HomePage() {
           <span>Tree-sitter AST</span>
           <span>Louvain seams</span>
           <span>1–5 hop impact</span>
-          <span>CRAG verified extraction</span>
+          <span>Planned CRAG verification</span>
         </footer>
       </div>
     </main>

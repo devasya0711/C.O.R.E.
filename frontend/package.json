@@ -7,15 +7,19 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit",
-    "lint": "next lint"
+    "lint": "eslint .",
+    "test": "tsc --project tests/tsconfig.json && node --test tests/auth.test.mjs",
+    "test:smoke": "node --test tests/production-auth.test.mjs"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.9.17",
     "@xyflow/react": "^12.8.5",
     "next": "^15.4.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.7",
     "@types/node": "^22.15.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",

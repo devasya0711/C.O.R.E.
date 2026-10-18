@@ -27,6 +27,11 @@ a {
   text-decoration: none;
 }
 
+:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 3px;
+}
+
 ::selection {
   background: #4f46e5;
   color: #f3f4f6;
