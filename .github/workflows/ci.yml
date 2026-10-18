@@ -35,6 +35,11 @@ jobs:
       - name: TypeScript
         working-directory: frontend
         run: npm run typecheck
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
+      - name: Verify build did not modify dependency lockfile
+        run: git diff --exit-code -- frontend/package-lock.json
 
   docker:
     runs-on: ubuntu-latest

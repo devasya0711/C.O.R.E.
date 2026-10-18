@@ -130,8 +130,41 @@ commits.
 - [ ] `docker compose up -d` and image builds are not verifiable here because
   the Docker CLI/daemon is unavailable in this environment. GitHub Actions
   remains configured to run the Docker build check.
-- [x] The Phase 1 changes are committed locally; push requires the user's
-  SSH-authenticated WSL session because this runner cannot access that agent.
+- [x] The initial Phase 1 commit `5dbce2b` was pushed from the user's
+  SSH-authenticated WSL session; local `origin/main` points to that commit.
+
+**Batch 1 CI repair (after the initial push):**
+
+- Reproduced a clean frontend install failing at `npm ci`: the committed
+  lockfile had incomplete optional Sharp platform-package entries. Existing
+  local `node_modules` hid this during the original checks. Repaired the
+  lockfile with `npm install --package-lock-only --ignore-scripts`, without
+  upgrading the existing dependency versions.
+- `npm run typecheck` now generates Next.js route declarations with
+  `next typegen` before running `tsc --noEmit`; type checks are not disabled.
+- The frontend Docker install now uses `npm ci` and requires the lockfile.
+  `frontend/.dockerignore` prevents local `node_modules`, `.next`, environment
+  files, and TypeScript caches from overwriting clean container dependencies.
+- CI also runs the production frontend build and verifies that it leaves the
+  lockfile unchanged. The existing clean `npm ci` step remains the regression
+  check for the original install failure.
+- Verified a fresh tracked-file snapshot (no `node_modules`, `.next`, or
+  TypeScript cache): `npm ci`, `npm run typecheck`, and `npm run build` all
+  passed on Node 22.23.3/npm 10.9.9. Lockfile contents before and after these
+  commands have the same Git blob hash.
+- Installed Python 3.12.15 in this runner and reran the backend CI checks in an
+  isolated virtual environment: Ruff passed and pytest reported **5 passed**.
+  Ruff formatting also passes. One upstream Starlette/httpx deprecation
+  warning remains.
+- `npm ci` reports 11 dependency advisories (3 moderate, 8 high); these were
+  already present and were not hidden or addressed with an unreviewed forced
+  upgrade. They remain security-audit work, not a passing security verdict.
+- Remote Actions logs/check results are not accessible to this runner:
+  `gh run list --repo devasya0711/C.O.R.E. --limit 3` requests authentication.
+  The GitHub CLI is now installed, but the WSL login/SSH agent is not shared
+  into the isolated runner. The repaired revision must be pushed and its
+  GitHub checks confirmed before starting Batch 2. Docker image/boot
+  verification remains unavailable locally because Docker is not installed.
 
 ### Batch 2 — Phase 2: Database Layer, Clerk Auth & Security Middleware
 
