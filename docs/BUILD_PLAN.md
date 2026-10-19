@@ -154,6 +154,57 @@ markers without blocking implementation:
     Git commit). The fixture now imports real SQLAlchemy Table/Column types and
     uses conventional `__tablename__` metadata on domain records instead of the
     initial scaffold's SQLAlchemy-like marker classes.
+27. **Louvain projection and repeatability.** Cluster the undirected code graph
+    (CALLS/INHERITS/CONTAINS/ROUTES_TO, weighted by relationship multiplicity).
+    Ignore self-loops; exclude DBTable hubs from modularity so a shared table
+    cannot fuse otherwise independent seams. NetworkX uses sorted input and
+    seed 42; GDS uses ordered projection input and single-threaded projection/
+    Louvain. GDS has no documented `randomSeed` setting. Canonical membership
+    ordering removes arbitrary algorithm IDs; different algorithms/versions can
+    still choose different equally valid partitions. Only missing GDS procedures
+    trigger fallback; network/auth/algorithm errors remain visible failures.
+28. **Shared-table semantics and metrics.** DATABASE.md defines
+    `shared_db_tables` as all tables accessed by two or more communities,
+    including read-only coupling. Original READS_FROM/WRITES_TO edges distinguish
+    read-only sharing from write contention. Metadata contains actual table
+    names, not qualified `db:` keys. Exclusive tables inherit their sole owner's
+    community; shared/unreferenced tables have no unique community. Cohesion is
+    weighted internal/(internal+boundary) and coupling its complement; an
+    isolated community scores 1/0. Tables do not affect these code-edge ratios.
+29. **LLM-synthesized seam names.** Follow DATABASE.md's explicit naming
+    requirement using real OpenAI structured JSON-schema output, validated by
+    Pydantic. `LLM_MODEL` defaults to `gpt-4o`. Send bounded samples of symbol
+    names/counts/shared tables, not source bodies. Provider output supplies only
+    validated kebab-case names, never memberships or metrics. Persist/reuse names
+    for identical memberships; no key means `LLM_NOT_CONFIGURED`, not fabricated
+    names. Request deadlines and up to three backoff retries are configurable.
+30. **Analysis persistence and history.** PostgreSQL repository row locks
+    serialize seam requests and block ingestion transitions; readiness is
+    refreshed after acquiring a lock. Membership-stable seam UUIDs and
+    non-recycled community IDs preserve referenced migration rows. Historical
+    candidates remain stored, but only graph-present communities contribute
+    current studio metadata. Neo4j annotation replacement is transactional and
+    checks `ingestion_version`. SQL and Neo4j are not a distributed transaction:
+    a failure between commits may require idempotent re-analysis to reconcile
+    metadata. This is not claimed as cross-store atomicity.
+31. **Blast-radius semantics and risk.** Count only CALLS toward the requested
+    1..5-hop budget. Attach routes without spending another call hop; report
+    route-edge depth as max(1, handler depth). Class selection conservatively
+    includes declared methods and directly related base/subclass methods, not
+    full Python MRO. Include tables touched by seeds/callers and bounded target
+    callees. The specification supplies no scoring formula: use
+    `min(100, 5*callers + 15*endpoints + 10*tables + 5*caller_file_paths + 2*deepest_hop)`.
+    Low is <30, Medium <60, High otherwise. Explain every term. Free-text change
+    descriptions do not establish semantic breakage; this is structural risk.
+32. **Cache and query bounds.** Impact keys include verified user/repository,
+    live ingestion-version marker, and the validated request digest, with the
+    specified 300-second TTL. Recheck ownership/readiness before every hit;
+    corrupt/wrong-target entries are recomputed. Fixed depth-query maps and
+    explicit composite INDEX SEEK hints avoid warmed-planner full index scans.
+    Impact has 3-second server/5-second client deadlines and explicit overflow
+    errors at 10,000 query rows, 5,000 result nodes, or 10,000 result edges.
+    Boundary analysis caps 10,000 code nodes/100,000 relationships and runs
+    trusted NetworkX CPU work off the API event loop. Never silently truncate.
 
 ## Batch sequence and acceptance criteria
 
@@ -395,7 +446,10 @@ These are recorded gaps, not a clean final security/production verdict.
   limitations with diagnostics/full-source context for CRAG.
 - [ ] Container build/cold boot requires a Docker daemon. Compose configuration
   can be validated here, but native-store tests are not container boot proof.
-- [ ] Confirm this batch is pushed and verify its GitHub checks before Phase 4.
+- [x] Phase 3 commit `d1b5ec4` is reflected in the shared `origin/main` metadata.
+  The working tree was clean before Phase 4 began.
+- [ ] Remote GitHub Actions status remains unverified: runner SSH authentication
+  still fails independently of the user's authenticated WSL push.
 
 **Reproducing Phase 3 checks:** use the Python 3.12+ setup and disposable
 `TEST_DATABASE_URL`, `TEST_REDIS_URL`, and `TEST_NEO4J_URI` configuration described
@@ -420,6 +474,72 @@ fixture is explicitly test-only; these commands require no live OpenAI key.
   `PaymentProcessor.execute`.
 - **Completion:** Both endpoints return deterministic graph clusters and
   multi-hop blast-radius paths.
+
+**Batch 4 implementation and verification:**
+
+- [x] `BoundaryMapperAgent` executes real GDS Louvain with tenant-scoped,
+  UUID-named ephemeral projections and guaranteed cleanup attempts. Missing-GDS
+  fallback executes real NetworkX Louvain; other GDS failures are not hidden.
+  Canonical partitions, weighted cohesion/coupling, empty/isolated graphs,
+  read-only/write sharing, exclusive table ownership, and overflow are tested.
+- [x] `ImpactPredictorAgent` uses bounded variable-length, parameterized Cypher
+  with repository checks on every path node. Tests cover depth 1..5, alternate
+  paths, cycles, class methods/inheritance, actual route attachments, DB helper
+  calls, missing/unsupported targets, malicious cross-tenant links, injection-
+  like strings, deterministic risk, deadlines, and explicit dense-path limits.
+- [x] POST `/api/v1/repos/{repo_id}/seams/analyze` returns the specified seam
+  fields, stores clusters in PostgreSQL, and annotates Neo4j. Concurrent/repeated
+  requests preserve UUIDs/names. Re-analysis preserves migration references and
+  excludes obsolete shared-table metadata from the graph response.
+- [x] POST `/api/v1/repos/{repo_id}/impact` returns actual affected symbols,
+  connecting edges, tables, and an explained score. Real Redis tests verify
+  TTL, cache hits, snapshot invalidation, malformed entries, and graph/read
+  60/min rate limits. Both endpoints reject foreign owners and non-READY repos;
+  a row-lock race verifies stale READY reads cannot bypass ingestion state.
+- [x] Real structured OpenAI naming client with test-only HTTP fixtures for
+  strict schema, reordered names, malformed/refused/truncated responses,
+  duplicate/missing/invented IDs, unsafe names, retries, redaction, and absent
+  configuration. Missing configuration leaves no partial seam rows/annotations.
+- [x] Fixed an integration-discovered planner regression: plain `USING INDEX`
+  could scan 10,000 entries in route/DB lookups after warm-up. `USING INDEX SEEK`
+  and anchored class paths remove those scans. Real PROFILE regression checks
+  require bounded point seeks, including missing symbols.
+- [x] Entire backend/sample suite ran in **both native configurations**:
+  PostgreSQL 16.15 + Redis 7.0.15 + Neo4j 5.26.0, with and without actual
+  **GDS 2.13.2**. Each run: **388 passed, 3 skipped**, one upstream deprecation
+  warning. GDS run: 50.66 seconds; no-GDS run: 62.32 seconds. In each, the two
+  PostgreSQL-vs-SQLite-only cases and the opposite GDS-availability case skip
+  explicitly. The temporary GDS disable was reverted after the fallback run.
+- [x] Python 3.12.15 Ruff lint/format passed (62 files), strict mypy passed
+  (36 backend application modules). Frontend typecheck/lint, 7 auth unit tests,
+  production build, and 3 production auth smoke tests passed; no frontend UI
+  code or dependency lockfile changed.
+- [x] Actual 10,000-node sparse-chain depth-five full-analysis benchmark in the
+  GDS-configured run: first 9.33 ms; five warm calls min/median/max
+  **7.95/8.42/10.59 ms**. No-GDS run: first 18.06 ms, warm median 18.87 ms.
+  This supports the local sparse fixture, not a general dense/concurrent/hosted
+  500 ms SLA. Dense cycles separately exercise the explicit overflow failure.
+- [x] Compose configuration validated with ephemeral credentials and the new
+  `LLM_MODEL`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES`, and
+  `ANALYSIS_TIMEOUT_SECONDS` settings. CI now declares GDS/no-GDS backend matrix
+  entries; `TEST_GDS_EXPECTED` prevents silently substituting a skipped plugin
+  check for the selected matrix configuration. The boundary suite was rerun
+  with each explicit expectation: **37 passed, 1 opposite-state skip** in each.
+- [ ] Live OpenAI naming/Clerk sessions and Docker build/cold boot remain
+  credential/daemon gaps, not claimed successes. Remote Actions status requires
+  authenticated access. Existing npm/Clerk/Starlette warnings remain recorded.
+- [ ] Confirm this batch is pushed before Phase 5. Phase 5 must validate that a
+  selected historical seam still belongs to the active ingestion snapshot
+  before generating artifacts; preserving its foreign key alone is not proof.
+
+**Reproducing Phase 4 checks:** use the Batch 2 disposable-store setup and
+Batch 3 lint/type/test/frontend commands. Run the full suite once against a
+Neo4j server without GDS and once with compatible GDS 2.13.x installed/unrestricted
+for Neo4j 5.26. Set `TEST_GDS_EXPECTED=false` or `true`, respectively, to enforce
+the expected plugin state. Individual suites are `test_boundary_mapper.py`,
+`test_boundary_and_impact.py`, `test_analysis_api.py`, and `test_seam_naming.py`
+under `backend/tests/`. The OpenAI/Clerk boundaries remain explicit HTTP
+fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 
 ### Batch 5 — Phase 5: Agent 4, CRAG Sandbox Loop & GitHub PR Automation
 
@@ -528,18 +648,18 @@ fixture is explicitly test-only; these commands require no live OpenAI key.
 
 - [ ] **US-1.1** Submit GitHub URL/branch and build an interactive Neo4j graph — **B3/B6**; B3 backend verified, interactive studio remains B6
 - [ ] **US-1.2** Stream/show cloning, AST, embedding, and graph-index progress — **B3/B5/B6**; B3 durable progress/polling verified, frontend/SSE work remains
-- [ ] **US-2.1** Run Louvain and inspect cohesive seam clusters — **B4/B6**
-- [ ] **US-2.2** Highlight cross-community `WRITES_TO`/`READS_FROM` shared tables — **B4/B6**
-- [ ] **US-3.1** Simulate a signature change and trace one-to-five-hop callers/routes — **B4/B6**
-- [ ] **US-3.2** Return an explained 0–100 Blast Radius Risk Score — **B4/B6**
+- [ ] **US-2.1** Run Louvain and inspect cohesive seam clusters — **B4/B6**; B4 persisted clusters verified, studio rendering remains B6
+- [ ] **US-2.2** Highlight cross-community `WRITES_TO`/`READS_FROM` shared tables — **B4/B6**; B4 graph metadata verified, visual highlighting remains B6
+- [ ] **US-3.1** Simulate a signature change and trace one-to-five-hop callers/routes — **B4/B6**; B4 structural API verified, simulator UI remains B6
+- [x] **US-3.2** Return an explained 0–100 Blast Radius Risk Score — **B4** backend verified; B6 presentation remains
 - [ ] **US-4.1** Extract a seam into FastAPI service, Strangler Fig config, and adapter — **B5**
 - [ ] **US-4.2** CRAG/pytest verify with up to three corrections before GitHub PR — **B5**
 
 ### Functional requirements
 
 - [x] **FR-1 Static Analyzer:** Tree-sitter File/Class/Function/APIEndpoint/DBTable nodes, CALLS/INHERITS/READS_FROM/WRITES_TO edges, real embedding client — **B3**; live provider credential test remains
-- [ ] **FR-2 Boundary Mapper:** GDS Louvain with NetworkX fallback, cohesion/coupling, shared-table conflicts — **B4**
-- [ ] **FR-3 Impact Predictor:** bounded 1..5-hop Cypher, affected nodes/edges/routes, 0–100 risk — **B4**
+- [x] **FR-2 Boundary Mapper:** real GDS Louvain and NetworkX fallback, cohesion/coupling, shared-table dependencies — **B4**
+- [x] **FR-3 Impact Predictor:** bounded 1..5-hop Cypher, affected nodes/edges/routes, 0–100 structural risk — **B4**
 - [ ] **FR-4 CRAG Evaluator:** completeness checks, unresolved import/type detection, full-file AST fallback — **B5**
 - [ ] **FR-5 Refactor Coder & Sandbox:** service/Dockerfile/proxy/adapter artifacts, isolated pytest, stderr feedback, three retries — **B5**
 - [ ] **FR-6 GitHub PR Engine:** `refactor/extract-{seam}`, verified commit, Mermaid graph, blast-radius table, PR — **B5**
@@ -556,9 +676,9 @@ fixture is explicitly test-only; these commands require no live OpenAI key.
 - [x] **PUT `/api/v1/settings/github-token`** encrypted PAT storage — **B2** (decision 19 notes the Fernet/AES wording conflict)
 - [x] **POST `/api/v1/repos`** register/trigger URL or sample ingestion, 202 — **B3**
 - [x] **GET `/api/v1/repos`** list authenticated owner's repositories — **B3**
-- [x] **GET `/api/v1/repos/{repo_id}/graph`** React Flow nodes/edges with community/shared-table fields — **B3**; computed community/shared-table values remain **B4**
-- [ ] **POST `/api/v1/repos/{repo_id}/seams/analyze`** deterministic seam analysis — **B4**
-- [ ] **POST `/api/v1/repos/{repo_id}/impact`** bounded impact request and risk response — **B4**
+- [x] **GET `/api/v1/repos/{repo_id}/graph`** React Flow nodes/edges with computed community/shared-table metadata — **B3/B4**
+- [x] **POST `/api/v1/repos/{repo_id}/seams/analyze`** deterministic seam analysis and persistent names — **B4**
+- [x] **POST `/api/v1/repos/{repo_id}/impact`** bounded impact request, explained risk, 300-second snapshot-scoped cache — **B4**
 - [ ] **POST `/api/v1/repos/{repo_id}/migrations`** queue LangGraph migration, 202 — **B5**
 - [ ] **GET `/api/v1/repos/{repo_id}/migrations/{job_id}/stream`** SSE state events — **B5**
 - [ ] **POST `/api/v1/repos/{repo_id}/migrations/{job_id}/pr`** manual PR creation — **B5**
@@ -601,8 +721,8 @@ fixture is explicitly test-only; these commands require no live OpenAI key.
 
 - [ ] B1 — Phase 1 implementation pushed; Docker cold boot still unverified
 - [ ] B2 — Phase 2 implementation/tests pushed; live Clerk/remote CI unverified
-- [ ] B3 — Phase 3 implementation/local verification done; push confirmation pending, live provider/Docker gaps above
-- [ ] B4 — Phase 4
+- [ ] B3 — Phase 3 implementation/local verification pushed; live provider/Docker/remote CI gaps above
+- [ ] B4 — Phase 4 implementation and both native verification configurations done; push confirmation/live-provider/Docker gaps above
 - [ ] B5 — Phase 5
 - [ ] B6 — Phase 6
 - [ ] B7 — Prompt 14 QA

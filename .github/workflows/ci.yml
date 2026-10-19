@@ -8,6 +8,9 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        neo4j_plugins: ["[]", '["graph-data-science"]']
     services:
       postgres:
         image: postgres:16-alpine
@@ -31,6 +34,8 @@ jobs:
         image: neo4j:5.26-community
         env:
           NEO4J_AUTH: none
+          NEO4J_PLUGINS: ${{ matrix.neo4j_plugins }}
+          NEO4J_dbms_security_procedures_unrestricted: gds.*
         ports:
           - 127.0.0.1:7687:7687
         options: >-
@@ -40,6 +45,7 @@ jobs:
       TEST_DATABASE_URL: postgresql+asyncpg://core_test@127.0.0.1:5432/core_test
       TEST_REDIS_URL: redis://127.0.0.1:6379/15
       TEST_NEO4J_URI: bolt://127.0.0.1:7687
+      TEST_GDS_EXPECTED: ${{ matrix.neo4j_plugins == '[]' && 'false' || 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

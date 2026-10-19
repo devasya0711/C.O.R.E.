@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from neo4j import AsyncDriver, AsyncManagedTransaction
 
+from app.core.errors import ApiError
 from app.schemas.graph import (
     CodeEdge,
     CodeGraph,
@@ -81,6 +82,66 @@ class Neo4jService:
 
     def __init__(self, driver: AsyncDriver) -> None:
         self.driver = driver
+
+    async def snapshot_version(self, repo_id: UUID) -> str | None:
+        """Read a cheap snapshot marker before cache lookup, never cached itself."""
+        records, _, _ = await self.driver.execute_query(
+            "MATCH (n:CodeNode {repo_id: $repo_id}) "
+            "RETURN n.ingestion_version AS version LIMIT 1",
+            repo_id=str(repo_id),
+        )
+        return str(records[0]["version"]) if records else None
+
+    async def set_communities(
+        self, repo_id: UUID, assignments: dict[str, int], expected_version: str
+    ) -> None:
+        """Replace annotations only if analysis still describes this snapshot."""
+        async with self.driver.session() as session:
+            await session.execute_write(
+                self._set_communities, repo_id, assignments, expected_version
+            )
+
+    @staticmethod
+    async def _set_communities(
+        tx: AsyncManagedTransaction,
+        repo_id: UUID,
+        assignments: dict[str, int],
+        expected_version: str,
+    ) -> None:
+        result = await tx.run(
+            "MATCH (n:CodeNode {repo_id: $repo_id}) "
+            "RETURN collect(DISTINCT n.ingestion_version) AS versions",
+            repo_id=str(repo_id),
+        )
+        record = await result.single()
+        if record is None or record["versions"] != [expected_version]:
+            raise ApiError(
+                409,
+                "REPOSITORY_SNAPSHOT_CHANGED",
+                "Repository changed; retry analysis.",
+            )
+        result = await tx.run(
+            "MATCH (n:CodeNode {repo_id: $repo_id}) SET n.community_id = null",
+            repo_id=str(repo_id),
+        )
+        await result.consume()
+        result = await tx.run(
+            "UNWIND $rows AS row "
+            "MATCH (n:CodeNode {repo_id: $repo_id, qualified_name: row.name}) "
+            "SET n.community_id = row.community RETURN count(n) AS updated",
+            repo_id=str(repo_id),
+            rows=[
+                {"name": name, "community": community}
+                for name, community in sorted(assignments.items())
+            ],
+        )
+        record = await result.single()
+        if record is None or record["updated"] != len(assignments):
+            raise ApiError(
+                409,
+                "REPOSITORY_SNAPSHOT_CHANGED",
+                "Repository changed; retry analysis.",
+            )
 
     async def upsert_graph(self, repo_id: UUID, graph: CodeGraph) -> None:
         """Replace one repository atomically; never leave stale edges or symbols."""
@@ -189,6 +250,11 @@ class Neo4jService:
         self, repo_id: UUID, shared_tables: dict[int, list[str]] | None = None
     ) -> GraphResponse:
         graph = await self.load_graph(repo_id)
+        active = {node.community_id for node in graph.nodes}
+        shared_tables = {
+            key: value for key, value in (shared_tables or {}).items() if key in active
+        }
+        conflicts = {name for names in shared_tables.values() for name in names}
         incoming = Counter(edge.target for edge in graph.edges)
         outgoing = Counter(edge.source for edge in graph.edges)
         nodes = [
@@ -201,7 +267,9 @@ class Neo4jService:
                     **node.model_dump(),
                     incoming_count=incoming[node.qualified_name],
                     outgoing_count=outgoing[node.qualified_name],
-                    shared_db_tables=(shared_tables or {}).get(node.community_id, [])
+                    shared_db_tables=([node.name] if node.name in conflicts else [])
+                    if node.label == "DBTable"
+                    else shared_tables.get(node.community_id, [])
                     if node.community_id is not None
                     else [],
                 ),

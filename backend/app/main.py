@@ -9,6 +9,7 @@ import httpx
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1.analysis import router as analysis_router
 from app.api.v1.health import router as health_router
 from app.api.v1.repos import router as repos_router
 from app.api.v1.settings import router as settings_router
@@ -107,6 +108,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     protected.include_router(settings_router)
     protected.include_router(repos_router)
+    protected.include_router(analysis_router)
     application.include_router(protected)
     return application
 

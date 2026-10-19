@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_timeout_seconds: float = Field(default=30, gt=0, le=90)
     embedding_max_retries: int = Field(default=3, ge=0, le=3)
+    llm_model: str = Field(default="gpt-4o", min_length=1, max_length=128)
+    llm_timeout_seconds: float = Field(default=30, gt=0, le=60)
+    llm_max_retries: int = Field(default=3, ge=0, le=3)
+    analysis_timeout_seconds: float = Field(default=90, gt=0, le=180)
     sample_monolith_path: Path = Path(__file__).resolve().parents[3] / "sample_monolith"
     clone_timeout_seconds: float = Field(default=30, gt=0, le=300)
     ingestion_timeout_seconds: float = Field(default=90, gt=0, le=240)
