@@ -571,8 +571,9 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - Snapshot and source identity are checked before coding, sandbox execution,
   completion, and PR publication. Migration and ingestion share a Redis
   repository lease so ingestion cannot replace the source while a workflow is
-  executing. GitHub branch/commit/PR operations are idempotent and reject an
-  unrelated existing extraction branch.
+  executing, and the workflow regression suite verifies that a lost lease
+  blocks coding and sandbox execution. GitHub branch/commit/PR operations are
+  idempotent and reject an unrelated existing extraction branch.
 - Event delivery is best effort after durable state persistence: a temporary
   Redis Streams failure cannot turn a successful sandbox or PR result into a
   false `FAILED` job. SSE supports bounded replay and `Last-Event-ID`, and

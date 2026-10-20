@@ -51,9 +51,12 @@ def _graph_with_unrelated_node() -> CodeGraph:
 
 
 class FakeGraph:
-    def __init__(self, context: CodeGraph, versions: list[str]) -> None:
+    def __init__(
+        self, context: CodeGraph, versions: list[str], *, lease_valid: bool = True
+    ) -> None:
         self.context = context
         self.versions = versions
+        self.lease_is_valid = lease_valid
         self.snapshot_calls = 0
 
     async def retrieve_seam_context(self, repo_id: UUID, seam_id: UUID) -> CodeGraph:
@@ -65,6 +68,10 @@ class FakeGraph:
         index = min(self.snapshot_calls, len(self.versions) - 1)
         self.snapshot_calls += 1
         return self.versions[index]
+
+    async def lease_valid(self, repo_id: UUID) -> bool:
+        del repo_id
+        return self.lease_is_valid
 
 
 class FakeCRAG:
@@ -223,6 +230,7 @@ def _dependencies(
     source_reader: Mapping[str, str] | None = None,
     publisher: FakePublisher | None = None,
     versions: list[str] | None = None,
+    lease_valid: bool = True,
 ) -> tuple[
     MigrationDependencies,
     FakeGraph,
@@ -231,7 +239,9 @@ def _dependencies(
     FakeSandbox,
     FakePublisher,
 ]:
-    graph = FakeGraph(context or _graph(), versions or ["snapshot-1"])
+    graph = FakeGraph(
+        context or _graph(), versions or ["snapshot-1"], lease_valid=lease_valid
+    )
     evaluator = crag or FakeCRAG(sufficient=True)
     refactor_coder = coder or FakeCoder()
     runner = sandbox or FakeSandbox([{"passed": True, "stdout": "ok", "stderr": ""}])
@@ -428,6 +438,22 @@ async def test_stale_snapshot_is_checked_before_coding() -> None:
     assert publisher.events[-1].payload["error_code"] == (
         "MIGRATION_REFACTOR_CODING_FAILED"
     )
+
+
+@pytest.mark.asyncio
+async def test_lost_repository_lease_blocks_coding_and_sandbox() -> None:
+    dependencies, graph, _crag, coder, sandbox, publisher = _dependencies(
+        lease_valid=False
+    )
+
+    result = await build_migration_graph(dependencies).ainvoke(_state())
+
+    assert result["status"] == "FAILED"
+    assert result["error_stage"] == "REFACTOR_CODING"
+    assert graph.snapshot_calls == 1
+    assert coder.requests == []
+    assert sandbox.artifacts == []
+    assert publisher.events[-1].event_type is MigrationEventType.MIGRATION_FAILED
 
 
 @pytest.mark.asyncio
