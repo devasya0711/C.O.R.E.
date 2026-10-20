@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import type { RepositorySummary } from "@/types/repositories";
 
 interface RepositoryCardProps {
@@ -105,9 +107,12 @@ export function RepositoryCard({ repository, retrying, onRetry }: RepositoryCard
             {retrying ? "Retrying…" : "Retry ingestion"}
           </button>
         ) : repository.status === "READY" ? (
-          <span className="rounded-md border border-emerald-500/30 px-3 py-1.5 font-mono text-[10px] text-emerald-300">
-            Graph indexed
-          </span>
+          <Link
+            href={`/repos/${repository.id}/graph`}
+            className="rounded-md border border-emerald-500/30 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/10"
+          >
+            Open graph
+          </Link>
         ) : null}
       </div>
     </article>

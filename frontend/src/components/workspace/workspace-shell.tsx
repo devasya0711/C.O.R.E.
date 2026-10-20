@@ -7,7 +7,10 @@ const navigation = [
   { href: "/dashboard", label: "Repositories", marker: "REPO" },
 ];
 
-export function WorkspaceShell({ children }: PropsWithChildren) {
+export function WorkspaceShell({
+  children,
+  fullBleed = false,
+}: PropsWithChildren<{ fullBleed?: boolean }>) {
   return (
     <div className="min-h-screen bg-canvas text-primaryText">
       <aside className="fixed inset-y-0 left-0 hidden w-60 border-r border-hairline bg-panel lg:block">
@@ -62,7 +65,15 @@ export function WorkspaceShell({ children }: PropsWithChildren) {
           </div>
           <AccountNavigation />
         </header>
-        <main className="min-h-[calc(100vh-3.5rem)] px-5 py-8 lg:px-8">{children}</main>
+        <main
+          className={
+            fullBleed
+              ? "min-h-[calc(100vh-3.5rem)]"
+              : "min-h-[calc(100vh-3.5rem)] px-5 py-8 lg:px-8"
+          }
+        >
+          {children}
+        </main>
       </div>
     </div>
   );

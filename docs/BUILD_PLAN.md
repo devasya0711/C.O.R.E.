@@ -617,11 +617,22 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - Added sample-monolith intake, failed-ingestion retry, inline form validation,
   progress bars, and screen-reader status announcements. The dashboard does
   not fabricate seam or shared-database metrics that the current backend
-  response does not provide, and it does not link to an unimplemented graph
-  route.
+  response does not provide.
 - Verification completed with frontend typecheck, ESLint, existing auth tests,
   and production build. Authenticated Playwright coverage remains pending
   because this environment has no Clerk test session fixture.
+
+#### Phase 6B implementation record
+
+- Added the protected `/repos/[repoId]/graph` React Flow studio backed by the
+  authenticated `GET /api/v1/repos/{repo_id}/graph` endpoint. The studio uses
+  backend-provided IDs and deterministic positions, custom semantic code nodes,
+  relationship filters, symbol search, community rings, edge highlighting, and
+  a read-only source inspector.
+- Added a keyboard node-list fallback and truthful loading, empty, not-ready,
+  authentication, and graph failure states. Blast-radius scores, seam
+  extraction, and migration actions remain deferred because the current graph
+  response does not provide those contracts.
 
 ### Batch 7 — Prompt 14: Testing & QA
 
