@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     sandbox_docker_image: str = Field(
         default="core-sandbox:latest", min_length=1, max_length=256
     )
+    sandbox_require_docker: bool = False
     github_timeout_seconds: float = Field(default=15, gt=0, le=15)
     sample_monolith_path: Path = Path(__file__).resolve().parents[3] / "sample_monolith"
     clone_timeout_seconds: float = Field(default=30, gt=0, le=300)

@@ -36,6 +36,7 @@ class SandboxRunnerConfig(BaseModel):
     docker_image: str = Field(
         default="core-sandbox:latest", min_length=1, max_length=256
     )
+    require_docker: bool = False
 
     @field_validator("python_executable", "docker_executable", "docker_image")
     @classmethod
@@ -74,6 +75,12 @@ class SandboxResult(BaseModel):
 
 class SandboxValidationError(ValueError):
     """Raised when generated artifacts cannot be safely materialized."""
+
+
+class SandboxIsolationUnavailable(RuntimeError):
+    """Raised when a required Docker isolation boundary is unavailable."""
+
+    code = "SANDBOX_ISOLATION_UNAVAILABLE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +128,10 @@ class SandboxRunnerService:
                 self._copy_source(self.source_root, workspace)
             self._materialize(workspace, request.artifacts)
             docker_executable = self._docker_executable()
+            if docker_executable is None and self.config.require_docker:
+                raise SandboxIsolationUnavailable(
+                    "Docker sandbox isolation is required but unavailable."
+                )
             isolation = (
                 SandboxIsolation.DOCKER
                 if docker_executable is not None

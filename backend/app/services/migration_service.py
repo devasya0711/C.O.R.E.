@@ -328,6 +328,11 @@ class MigrationService:
                         max_output_bytes=self.settings.sandbox_max_output_bytes,
                         docker_executable=self.settings.sandbox_docker_executable,
                         docker_image=self.settings.sandbox_docker_image,
+                        require_docker=(
+                            self.settings.sandbox_require_docker
+                            or self.settings.environment.lower()
+                            in {"prod", "production"}
+                        ),
                     )
                 ).with_source(
                     checkout.path,

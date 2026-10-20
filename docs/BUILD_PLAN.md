@@ -586,10 +586,12 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - The Docker sandbox path uses the reproducible `backend/sandbox.Dockerfile`
   image and `--network=none`, read-only root, dropped capabilities, and a
   bounded timeout. The subprocess fallback is explicitly marked reduced
-  isolation and cannot automatically publish a PR. A Docker daemon/socket,
-  prebuilt sandbox image, live OpenAI key, and live GitHub PAT were not
-  available in this environment, so those production boundaries remain
-  unverified rather than claimed as passing.
+  isolation and cannot automatically publish a PR. Production can set
+  `SANDBOX_REQUIRE_DOCKER=true` (and `ENVIRONMENT=production`) to fail closed
+  when Docker is unavailable instead of completing through reduced isolation.
+  A Docker daemon/socket, prebuilt sandbox image, live OpenAI key, and live
+  GitHub PAT were not available in this environment, so those production
+  boundaries remain unverified rather than claimed as passing.
 
 ### Batch 6 — Phase 6: Industrial Dark-Mode Frontend Studio & Final Polish
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from app.services.sandbox_runner import (
     SandboxIsolation,
+    SandboxIsolationUnavailable,
     SandboxRequest,
     SandboxRunnerConfig,
     SandboxRunnerService,
@@ -39,6 +40,17 @@ async def test_passing_artifacts_use_explicit_subprocess_fallback() -> None:
     assert result.return_code == 0
     assert result.isolation is SandboxIsolation.SUBPROCESS
     assert result.timed_out is False
+
+
+@pytest.mark.asyncio
+async def test_required_docker_isolation_fails_closed_without_docker() -> None:
+    runner = _runner(require_docker=True)
+
+    with pytest.raises(
+        SandboxIsolationUnavailable,
+        match="Docker sandbox isolation is required but unavailable",
+    ):
+        await runner.run({})
 
 
 @pytest.mark.asyncio
