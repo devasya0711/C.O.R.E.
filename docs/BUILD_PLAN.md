@@ -605,6 +605,24 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - **Completion:** Full application runs via Docker Compose, passes CI, and is
   pushed to the specified repository.
 
+#### Phase 6A implementation record
+
+- Added the protected `/dashboard` repository workspace with the industrial
+  shell, account navigation, loading/error/empty states, repository cards, and
+  accessible GitHub import dialog.
+- Added an authenticated browser API client that obtains a Clerk session token,
+  calls repository list/create endpoints, and never places credentials in
+  rendered state. Active ingestion jobs poll the documented repository list
+  endpoint until the backend reports a terminal status.
+- Added sample-monolith intake, failed-ingestion retry, inline form validation,
+  progress bars, and screen-reader status announcements. The dashboard does
+  not fabricate seam or shared-database metrics that the current backend
+  response does not provide, and it does not link to an unimplemented graph
+  route.
+- Verification completed with frontend typecheck, ESLint, existing auth tests,
+  and production build. Authenticated Playwright coverage remains pending
+  because this environment has no Clerk test session fixture.
+
 ### Batch 7 — Prompt 14: Testing & QA
 
 - **Goal:** Execute the comprehensive QA suite across C.O.R.E.

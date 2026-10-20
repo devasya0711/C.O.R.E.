@@ -13,6 +13,12 @@ export async function AccountNavigation() {
     if (userId) {
       return (
         <nav aria-label="Account" className="flex items-center gap-3">
+          <Link
+            href="/dashboard"
+            className="rounded-md border border-hairline bg-panel px-3 py-2 text-xs font-medium text-secondaryText hover:bg-surface hover:text-primaryText"
+          >
+            Workspace
+          </Link>
           <span className="hidden font-mono text-xs text-secondaryText sm:inline">Account</span>
           <UserButton />
         </nav>
