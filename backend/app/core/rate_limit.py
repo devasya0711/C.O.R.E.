@@ -34,9 +34,9 @@ return {1, limit - count - 1}
 
 def rate_bucket(method: str, path: str) -> tuple[str, int]:
     """Apply the exact read/graph and ingestion/migration budgets in API.md."""
-    if method == "POST" and (
-        path.rstrip("/") == "/api/v1/repos" or "/migrations" in path
-    ):
+    if (
+        method == "POST" and path.rstrip("/") == "/api/v1/repos"
+    ) or "/migrations" in path:
         return "jobs", 10
     return "graph", 60
 

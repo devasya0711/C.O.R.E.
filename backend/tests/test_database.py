@@ -54,7 +54,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionm
 from sqlalchemy.pool import ConnectionPoolEntry
 
 BACKEND = Path(__file__).resolve().parents[1]
-REVISION = "0001_postgresql"
+BASE_REVISION = "0001_postgresql"
+HEAD_REVISION = "0002_migration_workflow"
 
 
 @dataclass
@@ -472,7 +473,7 @@ def test_alembic_postgresql_offline_upgrade_and_downgrade() -> None:
     assert "ck_repositories_ck_" not in sql
 
     downgrade = StringIO()
-    command.downgrade(_alembic_config(downgrade), f"{REVISION}:base", sql=True)
+    command.downgrade(_alembic_config(downgrade), f"{BASE_REVISION}:base", sql=True)
     sql = downgrade.getvalue()
     for table in Base.metadata.tables:
         assert f"DROP TABLE {table};" in sql
@@ -600,6 +601,6 @@ def test_postgresql_alembic_cli_uses_real_async_engine() -> None:
             )
             assert result.returncode == 0, "Async Alembic CLI migration failed."
             if arguments == ["current"]:
-                assert REVISION in result.stdout
+                assert HEAD_REVISION in result.stdout
     finally:
         asyncio.run(prepare_database(drop=True))

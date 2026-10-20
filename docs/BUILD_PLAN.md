@@ -558,6 +558,38 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - **Completion:** LangGraph extraction completes, sandbox tests pass, and
   state events stream.
 
+#### Phase 5 implementation record
+
+- The migration workflow is a real LangGraph `StateGraph`: selected seam
+  context is retrieved, CRAG checks completeness, missing source files are
+  augmented, structured artifacts are generated, pytest runs in a fresh
+  workspace, and failures retry up to three times before human review.
+- Migration jobs persist the requested PR intent, graph `snapshot_version`,
+  source commit SHA, artifacts, sandbox result/logs, isolation boundary, and
+  PR URL. Creation, SSE replay, and manual PR publication routes are protected
+  by Clerk ownership checks and repository readiness checks.
+- Snapshot and source identity are checked before coding, sandbox execution,
+  completion, and PR publication. Migration and ingestion share a Redis
+  repository lease so ingestion cannot replace the source while a workflow is
+  executing. GitHub branch/commit/PR operations are idempotent and reject an
+  unrelated existing extraction branch.
+- Event delivery is best effort after durable state persistence: a temporary
+  Redis Streams failure cannot turn a successful sandbox or PR result into a
+  false `FAILED` job. SSE supports bounded replay and `Last-Event-ID`, and
+  terminal reconnects close without a 15-minute polling delay.
+- Verification completed in the native Python 3.12 environment: focused
+  Phase 5 tests pass, the no-infrastructure backend suite passes with
+  infrastructure tests skipped, Ruff passes, and Alembic SQL generation was
+  validated. The full-store matrix remains dependent on the disposable
+  PostgreSQL, Redis, and Neo4j services being available.
+- The Docker sandbox path uses the reproducible `backend/sandbox.Dockerfile`
+  image and `--network=none`, read-only root, dropped capabilities, and a
+  bounded timeout. The subprocess fallback is explicitly marked reduced
+  isolation and cannot automatically publish a PR. A Docker daemon/socket,
+  prebuilt sandbox image, live OpenAI key, and live GitHub PAT were not
+  available in this environment, so those production boundaries remain
+  unverified rather than claimed as passing.
+
 ### Batch 6 — Phase 6: Industrial Dark-Mode Frontend Studio & Final Polish
 
 - **Goal:** Build the Next.js 15 UI following DESIGN.md, connect APIs, add E2E

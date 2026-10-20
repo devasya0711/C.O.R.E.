@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=30, gt=0, le=60)
     llm_max_retries: int = Field(default=3, ge=0, le=3)
     analysis_timeout_seconds: float = Field(default=90, gt=0, le=180)
+    migration_timeout_seconds: float = Field(default=300, gt=0, le=900)
+    sandbox_timeout_seconds: float = Field(default=30, gt=0, le=30)
+    sandbox_max_output_bytes: int = Field(default=65536, gt=0, le=16777216)
+    sandbox_docker_executable: str | None = "docker"
+    sandbox_docker_image: str = Field(
+        default="core-sandbox:latest", min_length=1, max_length=256
+    )
+    github_timeout_seconds: float = Field(default=15, gt=0, le=15)
     sample_monolith_path: Path = Path(__file__).resolve().parents[3] / "sample_monolith"
     clone_timeout_seconds: float = Field(default=30, gt=0, le=300)
     ingestion_timeout_seconds: float = Field(default=90, gt=0, le=240)

@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.analysis import router as analysis_router
 from app.api.v1.health import router as health_router
+from app.api.v1.migrations import router as migrations_router
 from app.api.v1.repos import router as repos_router
 from app.api.v1.settings import router as settings_router
 from app.core.auth import ClerkVerifier, get_current_user
@@ -22,6 +23,7 @@ from app.db.redis import create_redis_client
 from app.db.session import create_database
 from app.services.embedding_service import EmbeddingService
 from app.services.ingestion_service import IngestionService
+from app.services.migration_service import MigrationService
 from app.services.neo4j_service import Neo4jService
 from app.services.repository_source import RepositorySource
 
@@ -51,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             stack.push_async_callback(driver.close)
             await initialize_schema(driver)
         app.state.ingestion = None
+        app.state.migration_service = None
         if (
             driver
             and app.state.redis is not None
@@ -77,6 +80,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await service.start()
             stack.push_async_callback(service.close)
             app.state.ingestion = service
+        if (
+            driver
+            and app.state.redis is not None
+            and app.state.session_factory is not None
+        ):
+            migration_service = MigrationService(
+                app.state.session_factory,
+                app.state.redis,
+                Neo4jService(driver),
+                client,
+                settings,
+                app.state.migration_tasks,
+            )
+            app.state.migration_service = migration_service
+            stack.push_async_callback(migration_service.close)
+            await migration_service.resume_unfinished()
         yield
 
 
@@ -92,13 +111,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url=None,
     )
     application.state.settings = settings or get_settings()
+    application.state.migration_tasks = set()
     install_error_handlers(application)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=application.state.settings.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "Last-Event-ID",
+            "X-Request-ID",
+        ],
         expose_headers=["Retry-After"],
     )
     application.include_router(health_router, prefix="/api/v1")
@@ -109,6 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     protected.include_router(settings_router)
     protected.include_router(repos_router)
     protected.include_router(analysis_router)
+    protected.include_router(migrations_router)
     application.include_router(protected)
     return application
 

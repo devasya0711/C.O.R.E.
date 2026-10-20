@@ -82,6 +82,12 @@ async def analyze_seams(
             driver = _driver(request)
             graph = Neo4jService(driver)
             version = await graph.snapshot_version(repository.id)
+            if version is None:
+                raise ApiError(
+                    409,
+                    "REPOSITORY_GRAPH_EMPTY",
+                    "Repository graph is unavailable.",
+                )
             result = await BoundaryMapperAgent(driver).analyze(repository.id)
             existing = list(
                 await session.scalars(
@@ -113,12 +119,14 @@ async def analyze_seams(
                         repo_id=repository.id,
                         community_id=next_id,
                         suggested_name=names[community.community_id],
+                        snapshot_version=version,
                         node_ids=list(members),
                     )
                     next_id += 1
                     session.add(row)
                 row.cohesion_score = community.cohesion_score
                 row.shared_db_tables = list(community.shared_db_tables)
+                row.snapshot_version = version
                 remap[community.community_id] = row.community_id
                 rows.append(row)
             await session.flush()

@@ -101,6 +101,9 @@ List of DB tables shared with other clusters |
 | `node_ids` | `JSONB` | `NOT NULL, DEFAULT '[]'` | Array of
 Neo4j `qualified_name` identifiers |
 
+| `snapshot_version` | `VARCHAR(128)` | `NULLABLE` | Neo4j ingestion
+ snapshot used to validate historical seam membership |
+
 ### 2.4 `migration_jobs`
 
 | Column | Type | Constraints | Description |
@@ -115,6 +118,15 @@ CASCADE, INDEX` | Target repository |
 
 | `seam_id` | `UUID` | `FK -> seam_clusters.id ON DELETE
 CASCADE` | Target seam cluster |
+
+| `create_github_pr` | `BOOLEAN` | `NOT NULL, DEFAULT false` | Durable
+ request intent for automatic PR publication |
+
+| `snapshot_version` | `VARCHAR(128)` | `NULLABLE` | Active graph snapshot
+ validated before generation and publication |
+
+| `source_commit_sha` | `VARCHAR(64)` | `NULLABLE` | Source checkout identity
+ validated against the migration snapshot |
 
 | `status` | `VARCHAR(32)` | `NOT NULL, DEFAULT 'QUEUED'` |
 `QUEUED`, `CRAG_EVAL`, `CODING`, `TESTING`, `COMPLETED`,
@@ -131,6 +143,15 @@ Map of relative file paths to generated code |
 
 | `sandbox_logs` | `TEXT` | `NULLABLE` | Captured `pytest`
 stdout/stderr |
+
+| `sandbox_passed` | `BOOLEAN` | `NOT NULL, DEFAULT false` | Whether the
+ verified sandbox run passed |
+
+| `sandbox_isolation` | `VARCHAR(32)` | `NULLABLE` | `docker` or reduced
+ `subprocess` execution boundary |
+
+| `sandbox_isolation_note` | `TEXT` | `NULLABLE` | Bounded explanation of
+ the execution boundary |
 
 | `pr_url` | `VARCHAR(512)` | `NULLABLE` | Resulting GitHub
 Pull Request URL |

@@ -11,6 +11,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -119,6 +120,7 @@ class SeamCluster(Base):
     repo_id: Mapped[UUID] = mapped_column(
         ForeignKey("repositories.id", ondelete="CASCADE"), index=True
     )
+    snapshot_version: Mapped[str | None] = mapped_column(String(128))
     community_id: Mapped[int] = mapped_column(Integer)
     suggested_name: Mapped[str] = mapped_column(String(128))
     cohesion_score: Mapped[float] = mapped_column(Float)
@@ -166,6 +168,14 @@ class MigrationJob(Base):
     seam_id: Mapped[UUID] = mapped_column(
         ForeignKey("seam_clusters.id", ondelete="CASCADE")
     )
+    create_github_pr: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    snapshot_version: Mapped[str | None] = mapped_column(String(128))
+    source_commit_sha: Mapped[str | None] = mapped_column(String(64))
+    sandbox_passed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     status: Mapped[str] = mapped_column(String(32), server_default="QUEUED")
     crag_status: Mapped[str] = mapped_column(String(32), server_default="PENDING")
     retry_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
@@ -176,6 +186,8 @@ class MigrationJob(Base):
         server_default=text("'{}'"),
     )
     sandbox_logs: Mapped[str | None] = mapped_column(Text)
+    sandbox_isolation: Mapped[str | None] = mapped_column(String(32))
+    sandbox_isolation_note: Mapped[str | None] = mapped_column(Text)
     pr_url: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
