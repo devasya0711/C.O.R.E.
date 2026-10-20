@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Literal
 
-import asyncpg  # type: ignore[import-untyped]
+import asyncpg
 from fastapi import APIRouter, Request
 from neo4j import AsyncGraphDatabase
 from pydantic import BaseModel, Field
