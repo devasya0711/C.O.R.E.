@@ -8,7 +8,7 @@
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit",
     "lint": "eslint .",
-    "test": "tsc --project tests/tsconfig.json && node --test tests/auth.test.mjs",
+    "test": "tsc --project tests/tsconfig.json && node --test tests/auth.test.mjs tests/migration-sse.test.mjs",
     "test:smoke": "node --test tests/production-auth.test.mjs"
   },
   "dependencies": {

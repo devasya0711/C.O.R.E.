@@ -630,9 +630,28 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
   relationship filters, symbol search, community rings, edge highlighting, and
   a read-only source inspector.
 - Added a keyboard node-list fallback and truthful loading, empty, not-ready,
-  authentication, and graph failure states. Blast-radius scores, seam
-  extraction, and migration actions remain deferred because the current graph
-  response does not provide those contracts.
+  authentication, and graph failure states. The graph now also invokes the
+  documented seam-analysis and blast-radius endpoints, highlights affected
+  nodes/edges, and starts snapshot-checked migrations from the seam panel.
+
+#### Phase 6C implementation record
+
+- Added the protected settings page with write-only GitHub PAT submission and
+  deployment-managed LLM configuration messaging. Tokens are cleared from
+  browser state after a successful save and are never rendered back.
+- Added the workspace command palette with keyboard navigation, repository and
+  graph-symbol search, direct graph navigation, and seam-analysis launch.
+- Added the migration review route with durable job-detail loading, replayable
+  SSE event consumption using `Last-Event-ID`, execution stepper, CRAG/sandbox
+  verification, artifact viewer, sandbox diagnostics, and manual GitHub PR
+  publication after verification.
+- Added the owner-scoped migration detail contract, status literals, and local
+  repository PR guard. The frontend disables GitHub publication controls for
+  non-GitHub sources and only enables impact simulation for Function/Class
+  graph targets.
+- Added deterministic frontend SSE parser tests alongside the existing
+  authentication tests; the parser preserves replay IDs, joins multiline data,
+  and rejects malformed migration payloads.
 
 ### Batch 7 — Prompt 14: Testing & QA
 

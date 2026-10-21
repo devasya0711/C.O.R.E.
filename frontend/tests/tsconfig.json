@@ -8,5 +8,5 @@
     "rootDir": "../src",
     "outDir": "../node_modules/.cache/core-auth-tests"
   },
-  "include": ["../src/middleware.ts"]
+  "include": ["../src/middleware.ts", "../src/lib/api/sse.ts"]
 }

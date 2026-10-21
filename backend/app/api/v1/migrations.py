@@ -27,8 +27,10 @@ from app.schemas.migrations import (
     MigrationCreate,
     MigrationEvent,
     MigrationEventType,
+    MigrationJobDetail,
     MigrationPRRequest,
     MigrationPRResponse,
+    MigrationStatus,
 )
 from app.services.migration_events import (
     MigrationEventService,
@@ -185,6 +187,34 @@ async def create_migration(
     return MigrationAccepted(job_id=job.id)
 
 
+@router.get("/{repo_id}/migrations/{job_id}", response_model=MigrationJobDetail)
+async def migration_detail(
+    repo_id: UUID,
+    job_id: UUID,
+    repository: Annotated[Repository, Depends(get_owned_repository)],
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> MigrationJobDetail:
+    del repo_id
+    job = await _owned_job(session, repository.id, job_id, user.id)
+    return MigrationJobDetail(
+        job_id=job.id,
+        repo_id=job.repo_id,
+        seam_id=job.seam_id,
+        status=cast(MigrationStatus, job.status),
+        create_github_pr=job.create_github_pr,
+        crag_status=job.crag_status,
+        retry_count=job.retry_count,
+        generated_artifacts=dict(job.generated_artifacts),
+        sandbox_logs=job.sandbox_logs,
+        sandbox_passed=job.sandbox_passed,
+        sandbox_isolation=job.sandbox_isolation,
+        sandbox_isolation_note=job.sandbox_isolation_note,
+        pr_url=job.pr_url,
+        created_at=job.created_at,
+    )
+
+
 @router.get("/{repo_id}/migrations/{job_id}/stream")
 async def migration_stream(
     repo_id: UUID,
@@ -278,6 +308,12 @@ async def create_migration_pr(
 ) -> MigrationPRResponse:
     del repo_id
     repository = await _lock_repository(session, repository, shared=True)
+    if not repository.repo_url.startswith("https://github.com/"):
+        raise ApiError(
+            422,
+            "GITHUB_REPOSITORY_REQUIRED",
+            "GitHub PR creation requires a GitHub repository source.",
+        )
     job = await _owned_job(session, repository.id, job_id, user.id)
     seam = await session.scalar(
         select(SeamCluster).where(

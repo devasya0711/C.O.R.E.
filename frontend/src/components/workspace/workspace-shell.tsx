@@ -2,9 +2,11 @@ import Link from "next/link";
 import type { PropsWithChildren } from "react";
 
 import { AccountNavigation } from "@/components/auth/account-navigation";
+import { CommandPalette } from "@/components/workspace/command-palette";
 
 const navigation = [
   { href: "/dashboard", label: "Repositories", marker: "REPO" },
+  { href: "/settings", label: "Settings", marker: "CONF" },
 ];
 
 export function WorkspaceShell({
@@ -63,7 +65,10 @@ export function WorkspaceShell({
             </p>
             <p className="text-sm font-medium text-primaryText">Repository workspace</p>
           </div>
-          <AccountNavigation />
+          <div className="flex items-center gap-3">
+            <CommandPalette />
+            <AccountNavigation />
+          </div>
         </header>
         <main
           className={

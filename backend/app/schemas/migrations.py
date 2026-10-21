@@ -56,7 +56,9 @@ TERMINAL_MIGRATION_EVENTS = frozenset(
 )
 TERMINAL_EVENT_TYPES = TERMINAL_MIGRATION_EVENTS
 
-MigrationStatus = Literal["QUEUED", "RUNNING", "COMPLETED", "FAILED"]
+MigrationStatus = Literal[
+    "QUEUED", "CRAG_EVAL", "CODING", "TESTING", "COMPLETED", "FAILED"
+]
 MigrationPRStatus = Literal["PR_CREATED", "COMPLETED"]
 
 JSONScalar: TypeAlias = None | bool | int | float | str  # noqa: UP040
@@ -184,6 +186,29 @@ class MigrationAccepted(BaseModel):
 
     job_id: UUID
     status: Literal["QUEUED"] = "QUEUED"
+
+
+class MigrationJobDetail(BaseModel):
+    """Owner-scoped metadata and generated artifacts for the review screen."""
+
+    model_config = ConfigDict(
+        extra="forbid", from_attributes=True, strict=True, hide_input_in_errors=True
+    )
+
+    job_id: UUID
+    repo_id: UUID
+    seam_id: UUID
+    status: MigrationStatus
+    create_github_pr: StrictBool
+    crag_status: StrictStr
+    retry_count: StrictInt = Field(ge=0, le=3)
+    generated_artifacts: dict[str, str] = Field(default_factory=dict)
+    sandbox_logs: StrictStr | None = None
+    sandbox_passed: StrictBool
+    sandbox_isolation: StrictStr | None = None
+    sandbox_isolation_note: StrictStr | None = None
+    pr_url: StrictStr | None = None
+    created_at: datetime
 
 
 class MigrationEvent(BaseModel):
@@ -319,6 +344,7 @@ __all__ = [
     "JSONValue",
     "MigrationAccepted",
     "MigrationAcceptedResponse",
+    "MigrationJobDetail",
     "MigrationCreate",
     "MigrationCreateRequest",
     "MigrationEvent",

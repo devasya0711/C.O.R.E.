@@ -35,7 +35,8 @@ internal `user_id`.
     > connectivity. Returns 200 OK.
 
 -   **PUT /api/v1/settings/github-token** — Encrypts and saves a user's
-    > GitHub PAT.
+    > GitHub PAT. Request body: `{ "token": "ghp_..." }`. Response:
+    > `{ "status": "saved" }`; the token is never returned.
 
 ### **2.2 Repositories & AST Ingestion (Agent 1)**
 
@@ -184,13 +185,34 @@ route and 2 upstream modules."
 -   **GET /api/v1/repos/{repo_id}/migrations/{job_id}/stream**
 
     -   **Purpose:** Server-Sent Events (SSE) stream emitting real-time
-        > state updates (AGENT_START, CRAG_DECISION, SANDBOX_ITERATION,
-        > ARTIFACTS_READY, PR_CREATED).
+        > state updates. Each frame contains `id`, `event`, and JSON `data`.
+        > The JSON event payload contains `job_id`, `repo_id`, `event_type`,
+        > `payload`, and `timestamp`. Clients may send `Last-Event-ID` to
+        > replay events after reconnecting. Event types are
+        > `AGENT_START`, `CRAG_DECISION`, `SANDBOX_ITERATION`,
+        > `ARTIFACTS_READY`, `PR_CREATED`, `MIGRATION_FAILED`, `HUMAN_REVIEW`,
+        > and `COMPLETED`.
+
+-   **GET /api/v1/repos/{repo_id}/migrations/{job_id}**
+
+    -   **Purpose:** Returns owner-scoped migration status, CRAG/sandbox
+        > verification, generated artifacts, and an optional PR URL for the
+        > review screen.
+
+    -   **Response (200 OK):** Includes `job_id`, `repo_id`, `seam_id`,
+        > `status` (`QUEUED`, `CRAG_EVAL`, `CODING`, `TESTING`, `COMPLETED`,
+        > or `FAILED`), `create_github_pr`, `crag_status`, `retry_count`,
+        > `generated_artifacts`, `sandbox_logs`, `sandbox_passed`,
+        > `sandbox_isolation`, `sandbox_isolation_note`, `pr_url`, and
+        > `created_at`.
 
 -   **POST /api/v1/repos/{repo_id}/migrations/{job_id}/pr**
 
     -   **Purpose:** Manually triggers GitHub branch push and Pull
-        > Request creation for a completed migration job.
+        > Request creation for a completed, sandbox-verified migration job.
+        > Request body: `{ "job_id": "uuid", "title": "Extract service" }`.
+        > The repository source must be a GitHub URL; local sample repositories
+        > return `GITHUB_REPOSITORY_REQUIRED`.
 
 ## **3. Rate Limiting & Failure Handling**
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ from app.api.v1 import migrations as migration_api
 from app.api.v1.migrations import (
     create_migration,
     create_migration_pr,
+    migration_detail,
     migration_stream,
 )
 from app.core.config import Settings
@@ -247,6 +249,7 @@ async def test_manual_pr_endpoint_checks_job_identifier_and_delegates(
         id=repo_id,
         user_id=user_id,
         status="READY",
+        repo_url="https://github.com/example/core",
         default_branch="main",
     )
     seam = SimpleNamespace(id=seam_id, repo_id=repo_id)
@@ -278,6 +281,76 @@ async def test_manual_pr_endpoint_checks_job_identifier_and_delegates(
     )
 
     assert result.pr_number == 7
+
+
+@pytest.mark.asyncio
+async def test_migration_detail_returns_owner_scoped_artifacts_and_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_id, user_id, seam_id, job_id = uuid4(), uuid4(), uuid4(), uuid4()
+    created_at = datetime.now(UTC)
+    job = SimpleNamespace(
+        id=job_id,
+        repo_id=repo_id,
+        seam_id=seam_id,
+        status="COMPLETED",
+        create_github_pr=False,
+        crag_status="SUFFICIENT",
+        retry_count=1,
+        generated_artifacts={"services/payments.py": "def pay() -> None:\n    pass\n"},
+        sandbox_logs="1 passed",
+        sandbox_passed=True,
+        sandbox_isolation="docker",
+        sandbox_isolation_note=None,
+        pr_url=None,
+        created_at=created_at,
+    )
+    monkeypatch.setattr(migration_api, "_owned_job", lambda *args: _async_value(job))
+
+    result = await migration_detail(
+        repo_id,
+        job_id,
+        SimpleNamespace(id=repo_id),  # type: ignore[arg-type]
+        SimpleNamespace(id=user_id),  # type: ignore[arg-type]
+        SimpleNamespace(),  # type: ignore[arg-type]
+    )
+
+    assert result.job_id == job_id
+    assert result.generated_artifacts["services/payments.py"].startswith("def pay")
+    assert result.sandbox_passed is True
+    assert result.created_at == created_at
+
+
+@pytest.mark.asyncio
+async def test_manual_pr_rejects_local_repository_before_provider_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_id, user_id, job_id = uuid4(), uuid4(), uuid4()
+    repository = SimpleNamespace(
+        id=repo_id,
+        user_id=user_id,
+        status="READY",
+        repo_url="local://sample_monolith",
+        default_branch="main",
+    )
+    monkeypatch.setattr(
+        migration_api,
+        "_lock_repository",
+        lambda _session, value, **_kwargs: _async_value(value),
+    )
+
+    with pytest.raises(ApiError, match="GitHub repository source") as error:
+        await create_migration_pr(
+            repo_id,
+            job_id,
+            MigrationPRRequest(job_id=job_id),
+            _request(FastAPI()),
+            repository,  # type: ignore[arg-type]
+            SimpleNamespace(id=user_id),  # type: ignore[arg-type]
+            _FakeSession(),  # type: ignore[arg-type]
+        )
+
+    assert error.value.status_code == 422
 
 
 @pytest.mark.asyncio
