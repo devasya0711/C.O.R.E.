@@ -47,6 +47,19 @@ services:
       timeout: 3s
       retries: 12
 
+  sandbox:
+    image: ${SANDBOX_DOCKER_IMAGE:-core-sandbox:latest}
+    build:
+      context: ./backend
+      dockerfile: sandbox.Dockerfile
+    command: ["python", "-c", "import time; time.sleep(2147483647)"]
+    init: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pytest"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   backend:
     build:
       context: ./backend
@@ -81,7 +94,7 @@ services:
       SANDBOX_DOCKER_MEMORY_MB: ${SANDBOX_DOCKER_MEMORY_MB:-512}
       SANDBOX_DOCKER_CPUS: ${SANDBOX_DOCKER_CPUS:-1.0}
       SANDBOX_DOCKER_PIDS_LIMIT: ${SANDBOX_DOCKER_PIDS_LIMIT:-256}
-      SANDBOX_REQUIRE_DOCKER: ${SANDBOX_REQUIRE_DOCKER:-false}
+      SANDBOX_REQUIRE_DOCKER: ${SANDBOX_REQUIRE_DOCKER:-true}
       GITHUB_TIMEOUT_SECONDS: ${GITHUB_TIMEOUT_SECONDS:-15}
       SAMPLE_MONOLITH_PATH: /sample_monolith
       CLONE_TIMEOUT_SECONDS: ${CLONE_TIMEOUT_SECONDS:-30}
@@ -89,12 +102,17 @@ services:
       INGESTION_MAX_SOURCE_BYTES: ${INGESTION_MAX_SOURCE_BYTES:-104857600}
     volumes:
       - ./sample_monolith:/sample_monolith:ro
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:-0}"
     depends_on:
       postgres:
         condition: service_healthy
       neo4j:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      sandbox:
         condition: service_healthy
     ports:
       - "8000:8000"
@@ -107,6 +125,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 20s
 
   frontend:
     build:
@@ -133,6 +152,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 10s
 
 volumes:
   postgres_data:

@@ -793,6 +793,29 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - **Completion:** The full stack builds and runs cleanly, then is committed and
   pushed.
 
+#### Batch 11 implementation record
+
+- [x] Backend uses a builder/runtime image split, a non-root runtime user, and
+  an entrypoint that applies `alembic upgrade head` before Uvicorn listens.
+- [x] Frontend uses the existing dependency/builder/standalone-runtime stages
+  and now runs the standalone server as the non-root `node` user.
+- [x] Compose builds and health-gates the dedicated pytest sandbox image,
+  forwards sandbox resource/isolation settings, mounts the Docker socket with a
+  configurable socket group, and starts the frontend only after the migrated
+  API is healthy.
+- [x] CI statically validates deployment descriptors, validates resolved Compose
+  configuration, and builds backend/frontend/sandbox images.
+- [x] README documents the Mermaid architecture, four-agent/CRAG walkthrough,
+  exact Compose quickstart, required runtime credentials, and verification
+  boundaries.
+- [x] `scripts/validate_deployment.py` provides a dependency-free static check
+  for the deployment contract.
+- [ ] Docker image builds, cold-start migrations, and live Compose healthchecks
+  could not be exercised here because the Docker CLI/daemon is unavailable.
+  CI remains the executable Docker verification path; no local Docker success
+  is claimed.
+- [ ] No commit or push was performed, per the Batch 11 task instruction.
+
 ### Batch 12 — Prompt 19: Production Monitoring & Maintenance
 
 - **Goal:** Implement structured observability and operational health checks.
