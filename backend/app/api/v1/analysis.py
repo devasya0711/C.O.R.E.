@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.boundary_mapper import BoundaryMapperAgent
 from app.agents.impact_predictor import ImpactPredictorAgent
 from app.api.dependencies import get_owned_repository
+from app.api.dependencies import lock_owned_repository as _lock_repository
 from app.core.auth import get_current_user
 from app.core.config import Settings
 from app.core.errors import ApiError
@@ -45,28 +46,6 @@ def _driver(request: Request) -> AsyncDriver:
             503, "ANALYSIS_UNAVAILABLE", "Repository analysis is unavailable."
         )
     return driver
-
-
-async def _lock_repository(
-    session: AsyncSession, repository: Repository, *, shared: bool = False
-) -> Repository:
-    # Serialize seam persistence and block concurrent ingestion progress/writes.
-    # Refresh the earlier ownership read after waiting, so READY isn't stale.
-    locked = await session.scalar(
-        select(Repository)
-        .where(Repository.id == repository.id, Repository.user_id == repository.user_id)
-        .with_for_update(read=shared)
-        .execution_options(populate_existing=True)
-    )
-    if locked is None:
-        raise ApiError(
-            403, "RESOURCE_ACCESS_DENIED", "Repository not found or access denied."
-        )
-    if locked.status != "READY":
-        raise ApiError(
-            409, "REPOSITORY_NOT_READY", "Repository ingestion is not ready."
-        )
-    return locked
 
 
 @router.post("/{repo_id}/seams/analyze", response_model=SeamsResponse)

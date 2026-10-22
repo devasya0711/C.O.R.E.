@@ -766,6 +766,22 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - **Completion:** Findings and safe refactorings are recorded, tests pass, and
   the review commit is pushed.
 
+#### Batch 10 review record
+
+- The review found no production `TODO`, `FIXME`, TypeScript `any`, or literal
+  mock implementation in the core agents/CRAG evaluator.
+- Refactor validation now parses generated Python, requires a real FastAPI
+  application, validates Dockerfile `FROM` plus command instructions, and
+  requires an AST-discovered test function. Adversarial marker-only artifacts
+  are covered by regression tests.
+- Warning-only CRAG incompleteness with no retrievable files now fails before
+  code generation and preserves bounded reasons in the migration event.
+- Migration SSE reconnects after request, stream-read, and UTF-8 decode
+  failures while preserving `Last-Event-ID`; unknown event types are rejected.
+- Repository locking is shared between analysis and migration routers, and
+  affected React Flow edges use the documented dashed style. The migration
+  stepper includes all seven documented stages.
+
 ### Batch 11 — Prompt 18: Deployment & Production Setup
 
 - **Goal:** Prepare C.O.R.E. for production deployment and recruiter

@@ -172,6 +172,55 @@ async def test_missing_required_components_is_explicit() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "content", "error_code", "missing_component"),
+    [
+        (
+            "service/main.py",
+            "from fastapi import FastAPI\napp = FastAPI(\n",
+            "REFACTOR_ARTIFACT_INVALID",
+            None,
+        ),
+        (
+            "Dockerfile",
+            "# FROM python:3.12-slim\nCMD ['python']\n",
+            "REFACTOR_ARTIFACTS_INCOMPLETE",
+            "dockerfile",
+        ),
+        (
+            "tests/test_service.py",
+            "'''def test_fake(): pass'''\n",
+            "REFACTOR_ARTIFACTS_INCOMPLETE",
+            "tests",
+        ),
+        (
+            "service/main.py",
+            "'''from fastapi import FastAPI\\napp = FastAPI()'''\n",
+            "REFACTOR_ARTIFACTS_INCOMPLETE",
+            "fastapi_service",
+        ),
+    ],
+)
+async def test_adversarial_artifacts_must_have_structural_components(
+    path: str,
+    content: str,
+    error_code: str,
+    missing_component: str | None,
+) -> None:
+    artifacts = complete_artifacts()
+    artifacts[path] = content
+
+    with pytest.raises(ApiError) as caught:
+        await RefactorCoderAgent(
+            FixtureProvider({"artifacts": artifacts}), settings=Settings()
+        ).generate(request())
+
+    assert caught.value.code == error_code
+    if missing_component is not None:
+        assert missing_component in caught.value.details["missing_components"]
+
+
+@pytest.mark.asyncio
 async def test_retry_passes_prior_sandbox_stderr_to_provider() -> None:
     provider = FixtureProvider(complete_artifacts())
     retry_stderr = "E   AssertionError: expected payment status\n"

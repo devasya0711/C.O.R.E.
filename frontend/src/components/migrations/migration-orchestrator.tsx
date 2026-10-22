@@ -11,10 +11,12 @@ import type { MigrationEvent, MigrationJobDetail } from "@/types/migrations";
 import { terminalMigrationEvents } from "@/types/migrations";
 
 const steps = [
-  { id: "context", label: "Context retrieval", events: ["AGENT_START"] },
-  { id: "crag", label: "CRAG evaluator", events: ["CRAG_DECISION"] },
-  { id: "coder", label: "Refactor coder", events: ["ARTIFACTS_READY"] },
-  { id: "sandbox", label: "Pytest sandbox", events: ["SANDBOX_ITERATION"] },
+  { id: "static-analyzer", label: "Static Analyzer", events: [] },
+  { id: "boundary-mapper", label: "Boundary Mapper", events: [] },
+  { id: "impact-predictor", label: "Impact Predictor", events: [] },
+  { id: "crag", label: "CRAG Evaluator", events: ["CRAG_DECISION"] },
+  { id: "coder", label: "Refactor Coder", events: ["ARTIFACTS_READY"] },
+  { id: "sandbox", label: "Pytest Sandbox", events: ["SANDBOX_ITERATION"] },
   { id: "github", label: "GitHub PR", events: ["PR_CREATED"] },
 ] as const;
 
@@ -24,6 +26,9 @@ function stepState(stepId: string, events: MigrationEvent[], detail: MigrationJo
   const failed = events.some((event) => event.event_type === "MIGRATION_FAILED" || event.event_type === "HUMAN_REVIEW");
   const hasPr = events.some((event) => event.event_type === "PR_CREATED") || Boolean(detail?.pr_url);
   const completed = detail?.status === "COMPLETED";
+  if (["static-analyzer", "boundary-mapper", "impact-predictor"].includes(stepId)) {
+    return detail ? "complete" : "active";
+  }
   if (stepId === "context") return events.some((event) => event.event_type === "AGENT_START") || completed ? "complete" : "active";
   if (stepId === "crag") return events.some((event) => event.event_type === "CRAG_DECISION") || completed ? "complete" : events.length > 0 ? "active" : "pending";
   if (stepId === "coder") return events.some((event) => event.event_type === "ARTIFACTS_READY") || completed ? "complete" : failed ? "failed" : events.some((event) => event.event_type === "CRAG_DECISION") ? "active" : "pending";

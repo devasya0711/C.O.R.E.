@@ -9,10 +9,12 @@ would be fabrication.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import inspect
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Protocol, cast
@@ -434,27 +436,121 @@ def _normalise_provider_response(raw: object) -> RefactorProviderResponse:
     raise _malformed_response()
 
 
-def _contains_fastapi(path: str, content: str) -> bool:
-    lowered = content.casefold()
-    return (
-        path.casefold().endswith(".py")
-        and "fastapi" in lowered
-        and "fastapi(" in lowered
-        and ("app =" in lowered or "application =" in lowered or "@app." in lowered)
-    )
+def _parse_python_artifacts(
+    artifacts: Mapping[str, str],
+) -> dict[str, ast.Module]:
+    trees: dict[str, ast.Module] = {}
+    for path, content in artifacts.items():
+        if not path.casefold().endswith(".py"):
+            continue
+        try:
+            trees[path] = ast.parse(content, filename=path)
+        except SyntaxError as error:
+            raise _artifact_error(
+                f"Generated Python artifact is not syntactically valid: {path}."
+            ) from error
+    return trees
+
+
+def _is_fastapi_service(path: str, tree: ast.Module) -> bool:
+    if not path.casefold().endswith(".py"):
+        return False
+
+    constructors: set[str] = set()
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "fastapi":
+            for alias in node.names:
+                if alias.name == "FastAPI":
+                    constructors.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "fastapi":
+                    modules.add(alias.asname or alias.name)
+
+    def is_factory_call(value: ast.expr | None) -> bool:
+        if not isinstance(value, ast.Call):
+            return False
+        function = value.func
+        if isinstance(function, ast.Name):
+            return function.id in constructors
+        return (
+            isinstance(function, ast.Attribute)
+            and function.attr == "FastAPI"
+            and isinstance(function.value, ast.Name)
+            and function.value.id in modules
+        )
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id in {"app", "application"}
+            for target in node.targets
+        ):
+            if is_factory_call(node.value):
+                return True
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if node.target.id in {"app", "application"} and is_factory_call(node.value):
+                return True
+    return False
 
 
 def _contains_proxy_config(path: str, content: str) -> bool:
     lowered_path = path.casefold()
-    lowered_content = content.casefold()
     named_config = any(
         token in lowered_path for token in ("proxy", "nginx", "envoy", "strangler")
     ) and lowered_path.rsplit("/", 1)[-1].endswith(
         (".conf", ".yaml", ".yml", ".json", ".toml")
     )
-    return named_config and any(
-        marker in lowered_content
-        for marker in ("proxy_pass", "upstream", "proxy", "route", "cluster")
+    if not named_config:
+        return False
+    if lowered_path.endswith(".conf"):
+        return bool(
+            re.search(
+                r"(?im)^\s*(?:proxy_pass\s+\S+\s*;|upstream\s+\S+\s*\{|location\s+\S+\s*\{)",
+                content,
+            )
+        )
+    return bool(
+        re.search(
+            r'(?im)^\s*["\']?(?:routes?|route_config|clusters?|static_resources|listeners|proxy(?:_pass)?)["\']?\s*:',
+            content,
+        )
+    )
+
+
+def _contains_dockerfile(path: str, content: str) -> bool:
+    if path.rsplit("/", 1)[-1].casefold() != "dockerfile":
+        return False
+    has_from = False
+    has_command = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = stripped.split(None, 1)
+        instruction = parts[0].casefold()
+        argument = parts[1].strip() if len(parts) == 2 else ""
+        if instruction == "from":
+            image = next(
+                (item for item in argument.split() if not item.startswith("--")),
+                "",
+            )
+            has_from = bool(image)
+        elif instruction in {"cmd", "entrypoint"}:
+            has_command = bool(argument)
+    return has_from and has_command
+
+
+def _contains_test(path: str, tree: ast.Module | None) -> bool:
+    if tree is None or not path.casefold().endswith(".py"):
+        return False
+    filename = path.rsplit("/", 1)[-1].casefold()
+    if "tests" not in path.casefold().split("/") and not filename.startswith("test_"):
+        return False
+    return any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test_")
+        for node in ast.walk(tree)
     )
 
 
@@ -491,13 +587,12 @@ def _validate_artifacts(
     if total > MAX_TOTAL_ARTIFACT_BYTES:
         raise _artifact_error("Generated artifacts exceed the total size limit.")
 
-    python_files = [(path, content) for path, content in artifacts.items()]
+    python_trees = _parse_python_artifacts(artifacts)
     has_service = any(
-        _contains_fastapi(path, content) for path, content in python_files
+        _is_fastapi_service(path, tree) for path, tree in python_trees.items()
     )
     has_dockerfile = any(
-        path.rsplit("/", 1)[-1].casefold() == "dockerfile" and bool(content.strip())
-        for path, content in artifacts.items()
+        _contains_dockerfile(path, content) for path, content in artifacts.items()
     )
     has_proxy = any(
         _contains_proxy_config(path, content) for path, content in artifacts.items()
@@ -508,18 +603,11 @@ def _validate_artifacts(
             token in path.casefold().rsplit("/", 1)[-1]
             for token in ("adapter", "monolith")
         )
-        and bool(content.strip())
-        for path, content in artifacts.items()
+        and path in python_trees
+        and bool(python_trees[path].body)
+        for path in artifacts
     )
-    has_tests = any(
-        path.casefold().endswith(".py")
-        and (
-            "tests" in path.casefold().split("/")
-            or path.rsplit("/", 1)[-1].startswith("test_")
-        )
-        and "def test_" in content
-        for path, content in artifacts.items()
-    )
+    has_tests = any(_contains_test(path, python_trees.get(path)) for path in artifacts)
     has_support = any(
         path.rsplit("/", 1)[-1].casefold()
         in {"requirements.txt", "pyproject.toml", "setup.cfg", "conftest.py"}

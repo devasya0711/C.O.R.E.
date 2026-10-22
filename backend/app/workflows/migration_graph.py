@@ -90,6 +90,7 @@ class MigrationState(TypedDict, total=False):
     crag_result: CRAGEvaluationResult | Mapping[str, object]
     crag_decision: CRAGDecision
     crag_status: Literal["PENDING", "SUFFICIENT", "AUGMENTED"]
+    crag_reasons: list[str]
     missing_files: list[str]
     augmented_sources: dict[str, str]
     retry_count: int
@@ -634,6 +635,11 @@ def _crag_result(
     )
 
 
+def _crag_event_reasons(reasons: Sequence[str]) -> list[str]:
+    """Keep diagnostic previews within the bounded migration event contract."""
+    return [reason[:512] for reason in reasons[:16]]
+
+
 def _nodes_edges(state: MigrationState) -> tuple[list[CodeNode], list[CodeEdge]]:
     nodes = state.get("seam_nodes", [])
     edges = state.get("seam_edges", [])
@@ -819,12 +825,20 @@ async def _crag_node(
             "crag_status": (
                 "SUFFICIENT" if decision == "context_sufficient" else "PENDING"
             ),
+            "crag_reasons": reasons,
             "missing_files": missing,
             "augmented_sources": augmented,
             "source_files": source_files,
             "status": "CRAG_EVAL",
-            "workflow_error": False,
+            "workflow_error": decision == "context_incomplete" and not missing,
         }
+        if output["workflow_error"]:
+            output.update(
+                {
+                    "error_code": "CRAG_CONTEXT_INCOMPLETE",
+                    "error_stage": "CRAG_EVALUATION",
+                }
+            )
         await _persist_and_publish(
             dependencies,
             {**state, **output},
@@ -834,6 +848,7 @@ async def _crag_node(
                 "decision": decision,
                 "missing_file_count": len(missing),
                 "reason_count": len(reasons),
+                "reasons": _crag_event_reasons(reasons),
             },
         )
         return output
@@ -1097,6 +1112,14 @@ async def _mark_failed_node(
     try:
         code = _text(state.get("error_code"), "MIGRATION_FAILED")
         output: MigrationState = {"status": "FAILED", "workflow_error": True}
+        failure_payload: dict[str, object] = {
+            "error_code": code,
+            "stage": _text(state.get("error_stage"), "MIGRATION"),
+            "error_type": _text(state.get("error_type"), "MigrationError"),
+        }
+        reasons = state.get("crag_reasons", [])
+        if reasons:
+            failure_payload["reasons"] = _crag_event_reasons(reasons)
         await _persist_and_publish(
             dependencies,
             {**state, **output},
@@ -1105,11 +1128,7 @@ async def _mark_failed_node(
                 "sandbox_logs": state.get("sandbox_logs"),
             },
             MigrationEventType.MIGRATION_FAILED,
-            {
-                "error_code": code,
-                "stage": _text(state.get("error_stage"), "MIGRATION"),
-                "error_type": _text(state.get("error_type"), "MigrationError"),
-            },
+            failure_payload,
         )
         return output
     except BaseException as error:

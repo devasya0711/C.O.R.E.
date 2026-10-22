@@ -381,6 +381,26 @@ async def test_incomplete_context_augments_source_before_coding() -> None:
 
 
 @pytest.mark.asyncio
+async def test_warning_only_incomplete_context_fails_before_coding() -> None:
+    crag = FakeCRAG(sufficient=False)
+    coder = FakeCoder()
+    dependencies, _graph_service, _crag, _coder, _sandbox, publisher = _dependencies(
+        crag=crag, coder=coder
+    )
+
+    result = await build_migration_graph(dependencies).ainvoke(_state())
+
+    assert result["status"] == "FAILED"
+    assert result["error_code"] == "CRAG_CONTEXT_INCOMPLETE"
+    assert result["crag_reasons"] == ["missing source context"]
+    assert coder.requests == []
+    assert publisher.events[-2].event_type is MigrationEventType.CRAG_DECISION
+    assert publisher.events[-2].payload["reasons"] == ["missing source context"]
+    assert publisher.events[-1].event_type is MigrationEventType.MIGRATION_FAILED
+    assert publisher.events[-1].payload["reasons"] == ["missing source context"]
+
+
+@pytest.mark.asyncio
 async def test_sandbox_retry_passes_stderr_back_to_the_coder() -> None:
     coder = FakeCoder()
     sandbox = FakeSandbox(

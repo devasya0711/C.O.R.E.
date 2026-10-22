@@ -328,6 +328,7 @@ export function GraphStudio({ repositoryId }: { repositoryId: string }) {
           style: {
             stroke: relatedToSelection || affectedByImpact ? "#EF4444" : "#4B5563",
             strokeWidth: relatedToSelection || affectedByImpact ? 2 : 1,
+            strokeDasharray: affectedByImpact ? "6 4" : undefined,
           },
           labelStyle: { fill: "#9CA3AF", fontSize: 9, fontFamily: "monospace" },
         };

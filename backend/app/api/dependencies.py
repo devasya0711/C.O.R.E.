@@ -29,3 +29,24 @@ async def get_owned_repository(
             403, "RESOURCE_ACCESS_DENIED", "Repository not found or access denied."
         )
     return repository
+
+
+async def lock_owned_repository(
+    session: AsyncSession, repository: Repository, *, shared: bool = False
+) -> Repository:
+    """Refresh readiness after waiting for ingestion's repository lock."""
+    locked = await session.scalar(
+        select(Repository)
+        .where(Repository.id == repository.id, Repository.user_id == repository.user_id)
+        .with_for_update(read=shared)
+        .execution_options(populate_existing=True)
+    )
+    if locked is None:
+        raise ApiError(
+            403, "RESOURCE_ACCESS_DENIED", "Repository not found or access denied."
+        )
+    if locked.status != "READY":
+        raise ApiError(
+            409, "REPOSITORY_NOT_READY", "Repository ingestion is not ready."
+        )
+    return locked

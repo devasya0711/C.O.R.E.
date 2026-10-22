@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_owned_repository
+from app.api.dependencies import lock_owned_repository as _lock_repository
 from app.core.auth import get_current_user
 from app.core.config import Settings
 from app.core.errors import ApiError
@@ -348,24 +349,3 @@ async def create_migration_pr(
         )
     effective = payload.model_copy(update={"base_branch": repository.default_branch})
     return await _service(request).publish_job(job, repository, seam, user, effective)
-
-
-async def _lock_repository(
-    session: AsyncSession, repository: Repository, *, shared: bool = False
-) -> Repository:
-    """Refresh readiness after waiting for ingestion's repository lock."""
-    locked = await session.scalar(
-        select(Repository)
-        .where(Repository.id == repository.id, Repository.user_id == repository.user_id)
-        .with_for_update(read=shared)
-        .execution_options(populate_existing=True)
-    )
-    if locked is None:
-        raise ApiError(
-            403, "RESOURCE_ACCESS_DENIED", "Repository not found or access denied."
-        )
-    if locked.status != "READY":
-        raise ApiError(
-            409, "REPOSITORY_NOT_READY", "Repository ingestion is not ready."
-        )
-    return locked
