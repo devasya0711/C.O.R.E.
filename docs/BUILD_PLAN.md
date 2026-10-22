@@ -664,6 +664,25 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - **Completion:** Production logic is fixed at the root cause, all suites pass,
   and tests are committed and pushed.
 
+#### Batch 7 verification record
+
+- Ran the complete backend suite with the Python 3.12 CI environment: **373
+  passed, 104 skipped, 1 warning**. The skipped cases require live PostgreSQL,
+  Redis, or Neo4j services through `TEST_DATABASE_URL`, `TEST_REDIS_URL`, or
+  `TEST_NEO4J_URI`; no failures were hidden behind those skips.
+- The deterministic fixture coverage exercised AST parsing, graph ingestion,
+  boundary mapping, impact validation/risk calculations, CRAG decisions,
+  sandbox retry behavior, migration events/workflow/API contracts, settings,
+  repository ownership, GitHub service handling, and security checks.
+- Ran the complete frontend verification: `npm run typecheck`, `npm run lint`,
+  `npm test` (**9 passed**), `npm run test:smoke` (**3 passed**), and
+  `npm run build` all passed. The frontend suite covers authentication fail
+  closed behavior, production protected routes, and deterministic migration
+  SSE parsing/replay IDs.
+- Ran backend strict mypy, Ruff checks, and Ruff format checks successfully.
+  No production code changes were required by this QA pass; the next tracked
+  work is the separate root-cause debugging batch.
+
 ### Batch 8 — Prompt 15: Debugging / Root Cause
 
 - **Goal:** Reproduce any remaining FastAPI, LangGraph, Neo4j Cypher, Docker,
