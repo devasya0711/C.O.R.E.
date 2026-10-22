@@ -1,6 +1,6 @@
 # C.O.R.E. Final Production Audit
 
-**Audit date:** October 22, 2026  
+**Audit date:** October 22, 2026
 **Verdict:** **NOT READY**
 
 ## What passed locally
