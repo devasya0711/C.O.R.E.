@@ -36,6 +36,9 @@ class SandboxRunnerConfig(BaseModel):
     docker_image: str = Field(
         default="core-sandbox:latest", min_length=1, max_length=256
     )
+    docker_memory_mb: int = Field(default=512, ge=128, le=2048)
+    docker_cpus: float = Field(default=1.0, gt=0, le=4.0)
+    docker_pids_limit: int = Field(default=256, ge=32, le=4096)
     require_docker: bool = False
 
     @field_validator("python_executable", "docker_executable", "docker_image")
@@ -179,6 +182,10 @@ class SandboxRunnerService:
             docker_executable,
             "run",
             "--rm",
+            f"--memory={self.config.docker_memory_mb}m",
+            f"--memory-swap={self.config.docker_memory_mb}m",
+            f"--cpus={self.config.docker_cpus:g}",
+            f"--pids-limit={self.config.docker_pids_limit}",
             "--network=none",
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges",

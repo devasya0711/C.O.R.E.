@@ -19,6 +19,7 @@ from app.agents.crag_evaluator import CRAGEvaluatorAgent
 from app.agents.refactor_coder import RefactorCoderAgent
 from app.core.config import Settings
 from app.core.errors import ApiError
+from app.core.redaction import SecretRedactor
 from app.core.security import TokenCipher
 from app.db.models import MigrationJob, Repository, SeamCluster, User
 from app.schemas.graph import CodeGraph
@@ -34,7 +35,11 @@ from app.services.migration_events import (
 )
 from app.services.neo4j_service import Neo4jService
 from app.services.repository_source import RepositorySource
-from app.services.sandbox_runner import SandboxRunnerConfig, SandboxRunnerService
+from app.services.sandbox_runner import (
+    SandboxIsolation,
+    SandboxRunnerConfig,
+    SandboxRunnerService,
+)
 from app.workflows.migration_graph import (
     MigrationDependencies,
     MigrationState,
@@ -328,6 +333,9 @@ class MigrationService:
                         max_output_bytes=self.settings.sandbox_max_output_bytes,
                         docker_executable=self.settings.sandbox_docker_executable,
                         docker_image=self.settings.sandbox_docker_image,
+                        docker_memory_mb=self.settings.sandbox_docker_memory_mb,
+                        docker_cpus=self.settings.sandbox_docker_cpus,
+                        docker_pids_limit=self.settings.sandbox_docker_pids_limit,
                         require_docker=(
                             self.settings.sandbox_require_docker
                             or self.settings.environment.lower()
@@ -354,6 +362,12 @@ class MigrationService:
                     github_service=github,
                     session_factory=self.factory,
                     event_publisher=event_service,
+                    secret_redactor=SecretRedactor.from_settings(
+                        self.settings,
+                        extra_secrets=(
+                            (source_token,) if source_token is not None else ()
+                        ),
+                    ),
                     github_request_factory=self._github_request_factory(
                         state, repository, seam, encrypted_pat
                     ),
@@ -511,6 +525,15 @@ class MigrationService:
                 409,
                 "MIGRATION_NOT_VERIFIED",
                 "Migration artifacts are not sandbox-verified.",
+            )
+        if job.sandbox_isolation != SandboxIsolation.DOCKER.value:
+            raise ApiError(
+                409,
+                "SANDBOX_ISOLATION_UNAVAILABLE",
+                (
+                    "Migration artifacts must pass inside a Docker sandbox "
+                    "before publication."
+                ),
             )
         if repository.status != "READY":
             raise ApiError(

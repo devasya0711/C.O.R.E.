@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from uuid import UUID, uuid4
 
 import pytest
+from app.core.config import Settings
+from app.core.redaction import SecretRedactor
 from app.schemas.graph import CodeGraph, CodeNode
 from app.schemas.migrations import MigrationEvent, MigrationEventType
 from app.workflows.migration_graph import (
@@ -13,6 +15,7 @@ from app.workflows.migration_graph import (
     MigrationState,
     build_migration_graph,
 )
+from pydantic import SecretStr
 
 pytest.importorskip("langgraph")
 
@@ -231,6 +234,7 @@ def _dependencies(
     publisher: FakePublisher | None = None,
     versions: list[str] | None = None,
     lease_valid: bool = True,
+    secret_redactor: SecretRedactor | None = None,
 ) -> tuple[
     MigrationDependencies,
     FakeGraph,
@@ -255,6 +259,7 @@ def _dependencies(
             sandbox=runner,
             github_service=github,
             event_publisher=events,
+            secret_redactor=secret_redactor,
         ),
         graph,
         evaluator,
@@ -398,6 +403,51 @@ async def test_sandbox_retry_passes_stderr_back_to_the_coder() -> None:
     assert [event.event_type for event in publisher.events].count(
         MigrationEventType.SANDBOX_ITERATION
     ) == 2
+
+
+@pytest.mark.asyncio
+async def test_sandbox_logs_redact_secrets_before_retry_and_persistence() -> None:
+    secret = "configured-sandbox-secret"
+    sandbox = FakeSandbox(
+        [
+            {
+                "passed": False,
+                "stdout": f"stdout leaked {secret}",
+                "stderr": f"stderr leaked {secret}",
+            },
+            {
+                "passed": False,
+                "stdout": f"stdout leaked again {secret}",
+                "stderr": f"stderr leaked again {secret}",
+            },
+            {
+                "passed": False,
+                "stdout": f"stdout leaked final {secret}",
+                "stderr": f"stderr leaked final {secret}",
+            },
+        ]
+    )
+    coder = FakeCoder()
+    initial = _state()
+    job = FakeJob(initial["repo_id"], initial["seam_id"])
+    dependencies, _graph_service, _crag, _coder, _sandbox, _publisher = _dependencies(
+        coder=coder,
+        sandbox=sandbox,
+        secret_redactor=SecretRedactor.from_settings(
+            Settings(_env_file=None, openai_api_key=SecretStr(secret))
+        ),
+    )
+    dependencies.session_factory = lambda: FakeSession(
+        job, FakeRepository(), FakeSeam()
+    )
+
+    result = await build_migration_graph(dependencies).ainvoke(initial)
+
+    assert result["status"] == "FAILED"
+    assert secret not in str(job.sandbox_logs)
+    assert secret not in result["sandbox_logs"]
+    assert all(secret not in request.prior_sandbox_stderr for request in coder.requests)
+    assert "[REDACTED]" in str(job.sandbox_logs)
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,7 @@ from app.api.dependencies import get_owned_repository
 from app.core.auth import get_current_user
 from app.core.config import Settings
 from app.core.errors import ApiError
+from app.core.redaction import SecretRedactor
 from app.db.models import MigrationJob, Repository, SeamCluster, User
 from app.db.session import get_session
 from app.schemas.migrations import (
@@ -39,6 +40,7 @@ from app.services.migration_events import (
 )
 from app.services.migration_service import MigrationService
 from app.services.neo4j_service import Neo4jService
+from app.services.sandbox_runner import SandboxIsolation
 from app.workflows.migration_graph import MigrationState
 
 router = APIRouter(prefix="/repos", tags=["migrations"])
@@ -64,6 +66,10 @@ def _service(request: Request) -> MigrationService:
         cast(Settings, request.app.state.settings),
         cast(set[asyncio.Task[None]], request.app.state.migration_tasks),
     )
+
+
+def _redactor(request: Request) -> SecretRedactor:
+    return SecretRedactor.from_settings(getattr(request.app.state, "settings", None))
 
 
 async def _owned_job(
@@ -191,12 +197,14 @@ async def create_migration(
 async def migration_detail(
     repo_id: UUID,
     job_id: UUID,
+    request: Request,
     repository: Annotated[Repository, Depends(get_owned_repository)],
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> MigrationJobDetail:
     del repo_id
     job = await _owned_job(session, repository.id, job_id, user.id)
+    redactor = _redactor(request)
     return MigrationJobDetail(
         job_id=job.id,
         repo_id=job.repo_id,
@@ -206,10 +214,16 @@ async def migration_detail(
         crag_status=job.crag_status,
         retry_count=job.retry_count,
         generated_artifacts=dict(job.generated_artifacts),
-        sandbox_logs=job.sandbox_logs,
+        sandbox_logs=(
+            redactor.redact(job.sandbox_logs) if job.sandbox_logs is not None else None
+        ),
         sandbox_passed=job.sandbox_passed,
         sandbox_isolation=job.sandbox_isolation,
-        sandbox_isolation_note=job.sandbox_isolation_note,
+        sandbox_isolation_note=(
+            redactor.redact(job.sandbox_isolation_note)
+            if job.sandbox_isolation_note is not None
+            else None
+        ),
         pr_url=job.pr_url,
         created_at=job.created_at,
     )
@@ -325,6 +339,12 @@ async def create_migration_pr(
     if payload.job_id is not None and payload.job_id != job.id:
         raise ApiError(
             422, "VALIDATION_ERROR", "Migration job identifiers do not match."
+        )
+    if job.sandbox_isolation != SandboxIsolation.DOCKER.value:
+        raise ApiError(
+            409,
+            "SANDBOX_ISOLATION_UNAVAILABLE",
+            "Migration artifacts must pass inside a Docker sandbox before publication.",
         )
     effective = payload.model_copy(update={"base_branch": repository.default_branch})
     return await _service(request).publish_job(job, repository, seam, user, effective)

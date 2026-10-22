@@ -19,6 +19,7 @@ from uuid import UUID
 
 from app.agents.crag_evaluator import CRAGEvaluationResult
 from app.agents.refactor_coder import RefactorCoderRequest
+from app.core.redaction import SecretRedactor
 from app.db.models import MigrationJob, Repository, SeamCluster
 from app.schemas.graph import CodeEdge, CodeGraph, CodeNode
 from app.schemas.migrations import MigrationEvent, MigrationEventType
@@ -165,6 +166,7 @@ class MigrationDependencies:
     graph_service: object | None = None
     github: object | None = None
     github_request_factory: Callable[[MigrationState], object] | None = None
+    secret_redactor: SecretRedactor | None = None
 
     def resolved_graph(self) -> object:
         value = self.graph_service or self.graph
@@ -234,6 +236,12 @@ def _uuid(state: MigrationState, key: str) -> UUID:
 
 def _text(value: object, default: str = "") -> str:
     return value if isinstance(value, str) else default
+
+
+def _redact_text(dependencies: MigrationDependencies, value: str) -> str:
+    if dependencies.secret_redactor is None:
+        return value
+    return dependencies.secret_redactor.redact(value)
 
 
 def _mapping(value: object) -> Mapping[str, object] | None:
@@ -632,14 +640,16 @@ def _nodes_edges(state: MigrationState) -> tuple[list[CodeNode], list[CodeEdge]]
     return list(nodes), list(edges)
 
 
-def _coder_request(state: MigrationState) -> RefactorCoderRequest:
+def _coder_request(
+    dependencies: MigrationDependencies, state: MigrationState
+) -> RefactorCoderRequest:
     nodes, edges = _nodes_edges(state)
     seam_name = _text(state.get("seam_name"), "migration")
     source_files = dict(state.get("source_files", {}))
     retry_count = state.get("retry_count", 0)
     if type(retry_count) is not int:
         raise MigrationWorkflowError("Migration retry count is invalid.")
-    stderr = _text(state.get("sandbox_stderr"))
+    stderr = _redact_text(dependencies, _text(state.get("sandbox_stderr")))
     if retry_count > 0 and not stderr:
         stderr = "Sandbox failed without stderr output."
     return RefactorCoderRequest(
@@ -892,7 +902,7 @@ async def _coder_node(
 ) -> MigrationState:
     try:
         await _verify_snapshot(dependencies, state)
-        request = _coder_request(state)
+        request = _coder_request(dependencies, state)
         result = await _call(
             dependencies.resolved_coder(),
             ("generate_refactor", "generate", "code"),
@@ -935,13 +945,19 @@ async def _sandbox_node(
         passed, stdout, stderr, timed_out, isolation, isolation_note = _sandbox_result(
             result
         )
+        stdout = _redact_text(dependencies, stdout)
+        stderr = _redact_text(dependencies, stderr)
+        isolation_note = _redact_text(dependencies, isolation_note)
         retry_count = state.get("retry_count", 0)
         if not passed:
             retry_count = min(3, retry_count + 1)
+        safe_stderr = stderr or (
+            "Sandbox failed without stderr output." if not passed else ""
+        )
         logs = (
             f"isolation: {isolation}\n"
             f"isolation_note: {isolation_note}\n"
-            f"stdout:\n{stdout}\nstderr:\n{stderr}"
+            f"stdout:\n{stdout}\nstderr:\n{safe_stderr}"
         )
         output: MigrationState = {
             "sandbox_passed": passed,
@@ -949,8 +965,7 @@ async def _sandbox_node(
             "sandbox_isolation": isolation,
             "sandbox_isolation_note": isolation_note,
             "sandbox_stdout": stdout,
-            "sandbox_stderr": stderr
-            or ("Sandbox failed without stderr output." if not passed else ""),
+            "sandbox_stderr": safe_stderr,
             "sandbox_logs": logs,
             "retry_count": retry_count,
             "status": "TESTING",

@@ -717,6 +717,45 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - **Completion:** Findings are reported by severity, fixes are applied, all
   tests pass, and the remediation is committed and pushed.
 
+#### Batch 9 implementation record
+
+- [x] **High — reduced-isolation publication:** manual PR publication now
+  requires a completed sandbox result with `sandbox_isolation == "docker"` at
+  both the authenticated API boundary and the migration service boundary.
+  Passing deterministic subprocess fallback tests remains supported, while a
+  subprocess-only result cannot publish a GitHub PR.
+- [x] **Medium — Docker resource bounds:** Docker sandbox commands now apply
+  bounded memory/swap, CPU, and PID limits. `SANDBOX_DOCKER_MEMORY_MB`,
+  `SANDBOX_DOCKER_CPUS`, and `SANDBOX_DOCKER_PIDS_LIMIT` are validated in
+  settings and forwarded through Compose. Subprocess fallback behavior is
+  unchanged.
+- [x] **High — sandbox log redaction:** `SecretRedactor` centrally removes
+  configured application secrets, connection-URL passwords, and the transient
+  GitHub source credential from sandbox stdout/stderr and isolation notes
+  before durable workflow persistence. Retry stderr and migration-detail API
+  responses are redacted as defense in depth.
+- [x] Existing parameterized Cypher/SQL, owner-scoped authentication, Redis
+  rate-limit routing, explicit CORS origins, and temporary sandbox cleanup
+  regressions remain covered by the neighboring test suites.
+- [x] Focused Python 3.12 checks passed: **63 tests passed, 1 warning** for
+  the migration/security/sandbox/event suites. The neighboring injection,
+  auth, rate-limit, CORS, source-cleanup, and migration suites passed with
+  **158 passed, 42 skipped, 1 warning**.
+- [x] Ruff checks passed for all touched Python files, and Ruff format checks
+  passed for the same files.
+- [x] The complete local backend suite passed with **384 passed, 104 skipped,
+  1 warning** after installing the backend package in editable mode so the
+  intentionally isolated parser subprocess could import its trusted module.
+- [ ] Docker runtime flags were verified by command construction tests, but a
+  live Docker daemon could not be exercised because `docker --version` returns
+  `command not found` in this workspace. Container execution and cold-boot
+  verification remain deployment/CI work; no live success is claimed here.
+- [ ] Real PostgreSQL, Redis, and Neo4j cases remain skipped without the
+  documented `TEST_DATABASE_URL`, `TEST_REDIS_URL`, and `TEST_NEO4J_URI`
+  services. The local parameterized-query, ownership, rate-limit contract,
+  CORS, and cleanup regressions still ran successfully.
+- [ ] No commit or push was performed, per the Batch 9 task instruction.
+
 ### Batch 10 — Prompt 17: Code Review & Refactoring
 
 - **Goal:** Review the implementation against all source documents and safely

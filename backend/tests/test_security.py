@@ -3,6 +3,7 @@
 import pytest
 from app.core.config import Settings
 from app.core.errors import ApiError
+from app.core.redaction import SecretRedactor
 from app.core.security import TokenCipher
 from app.schemas.settings import GitHubTokenRequest
 from cryptography.fernet import Fernet
@@ -58,3 +59,24 @@ def test_cors_configuration_rejects_wildcard_and_non_origins(origin: str) -> Non
 def test_jwks_requires_https_without_embedded_credentials(url: str) -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, clerk_jwks_url=url)
+
+
+def test_secret_redactor_covers_settings_and_url_passwords() -> None:
+    api_key = "configured-openai-secret"
+    database_password = "db/password-value"
+    settings = Settings(
+        _env_file=None,
+        openai_api_key=SecretStr(api_key),
+        database_url=(
+            "postgresql+asyncpg://core:db%2Fpassword-value@localhost:5432/core"
+        ),
+    )
+    redactor = SecretRedactor.from_settings(settings)
+    text = f"api={api_key} raw={database_password} encoded=db%2Fpassword-value"
+
+    redacted = redactor.redact(text)
+
+    assert api_key not in redacted
+    assert database_password not in redacted
+    assert "db%2Fpassword-value" not in redacted
+    assert repr(redactor) == "SecretRedactor(<configured>)"

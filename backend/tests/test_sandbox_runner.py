@@ -14,6 +14,7 @@ from app.services.sandbox_runner import (
     SandboxRunnerService,
     SandboxValidationError,
 )
+from pydantic import ValidationError
 
 
 def _runner(**overrides: object) -> SandboxRunnerService:
@@ -188,3 +189,34 @@ async def test_stdout_and_stderr_are_independently_capped() -> None:
 def test_subprocess_fallback_does_not_require_docker() -> None:
     runner = _runner()
     assert runner._docker_executable() is None
+
+
+def test_docker_command_applies_bounded_resource_flags(tmp_path: Path) -> None:
+    runner = _runner(
+        docker_memory_mb=384,
+        docker_cpus=0.5,
+        docker_pids_limit=96,
+    )
+
+    command = runner._command(tmp_path, "/usr/bin/docker")
+
+    assert "--memory=384m" in command
+    assert "--memory-swap=384m" in command
+    assert "--cpus=0.5" in command
+    assert "--pids-limit=96" in command
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("docker_memory_mb", 127),
+        ("docker_memory_mb", 2049),
+        ("docker_cpus", 0),
+        ("docker_cpus", 4.1),
+        ("docker_pids_limit", 31),
+        ("docker_pids_limit", 4097),
+    ],
+)
+def test_docker_resource_configuration_is_bounded(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        SandboxRunnerConfig(**{field: value})
