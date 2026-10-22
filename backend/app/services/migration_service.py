@@ -336,6 +336,8 @@ class MigrationService:
                         docker_memory_mb=self.settings.sandbox_docker_memory_mb,
                         docker_cpus=self.settings.sandbox_docker_cpus,
                         docker_pids_limit=self.settings.sandbox_docker_pids_limit,
+                        docker_nofile_limit=self.settings.sandbox_docker_nofile_limit,
+                        docker_workspace_root=self.settings.sandbox_docker_workspace_root,
                         require_docker=(
                             self.settings.sandbox_require_docker
                             or self.settings.environment.lower()

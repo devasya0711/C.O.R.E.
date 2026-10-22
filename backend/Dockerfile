@@ -26,8 +26,8 @@ ENV PATH="/opt/venv/bin:${PATH}" \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates docker.io git \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system core \
-    && useradd --system --gid core --home-dir /nonexistent --shell /usr/sbin/nologin core
+    && groupadd --gid 1000 core \
+    && useradd --uid 1000 --gid core --home-dir /nonexistent --shell /usr/sbin/nologin core
 
 WORKDIR /app
 

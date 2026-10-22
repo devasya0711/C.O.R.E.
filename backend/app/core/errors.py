@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 from starlette.exceptions import HTTPException
 
+from app.core.logging import ensure_request_id
+
 
 class ApiError(Exception):
     """An explicitly safe public error; messages must not contain credentials."""
@@ -28,6 +30,7 @@ class ApiError(Exception):
 
 async def api_error_handler(request: Request, error: ApiError) -> JSONResponse:
     """Serialize a safe domain exception in the contract's standard envelope."""
+    request_id = ensure_request_id(request.scope)
     return JSONResponse(
         status_code=error.status_code,
         content={
@@ -37,7 +40,11 @@ async def api_error_handler(request: Request, error: ApiError) -> JSONResponse:
                 "details": error.details,
             }
         },
-        headers={"Cache-Control": "no-store", **error.headers},
+        headers={
+            "Cache-Control": "no-store",
+            **error.headers,
+            "X-Request-ID": request_id,
+        },
     )
 
 

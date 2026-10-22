@@ -9,12 +9,18 @@ from pathlib import Path
 
 try:
     from .maintenance_common import (
-        ensure_directory,
+        atomic_backup_directory,
+        maintenance_child_environment,
         parse_neo4j_database,
         run_command,
     )
 except ImportError:  # pragma: no cover - direct script execution
-    from maintenance_common import ensure_directory, parse_neo4j_database, run_command
+    from maintenance_common import (
+        atomic_backup_directory,
+        maintenance_child_environment,
+        parse_neo4j_database,
+        run_command,
+    )
 
 
 def build_command(admin_executable: str, database: str, output_dir: Path) -> list[str]:
@@ -38,15 +44,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--neo4j-admin", default=os.environ.get("NEO4J_ADMIN", "neo4j-admin")
     )
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
     try:
         database = parse_neo4j_database(args.database)
-        ensure_directory(args.output_dir)
-        run_command(
-            build_command(args.neo4j_admin, database, args.output_dir),
-            os.environ.copy(),
-            "neo4j-admin dump",
-        )
+        with atomic_backup_directory(args.output_dir, args.force) as temporary_output:
+            run_command(
+                build_command(args.neo4j_admin, database, temporary_output),
+                maintenance_child_environment(),
+                "neo4j-admin dump",
+            )
     except (OSError, RuntimeError, ValueError) as error:
         parser.error(str(error))
     print("Neo4j backup completed.")

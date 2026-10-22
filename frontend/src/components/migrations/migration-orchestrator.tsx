@@ -29,7 +29,6 @@ function stepState(stepId: string, events: MigrationEvent[], detail: MigrationJo
   if (["static-analyzer", "boundary-mapper", "impact-predictor"].includes(stepId)) {
     return detail ? "complete" : "active";
   }
-  if (stepId === "context") return events.some((event) => event.event_type === "AGENT_START") || completed ? "complete" : "active";
   if (stepId === "crag") return events.some((event) => event.event_type === "CRAG_DECISION") || completed ? "complete" : events.length > 0 ? "active" : "pending";
   if (stepId === "coder") return events.some((event) => event.event_type === "ARTIFACTS_READY") || completed ? "complete" : failed ? "failed" : events.some((event) => event.event_type === "CRAG_DECISION") ? "active" : "pending";
   if (stepId === "sandbox") return events.some((event) => event.event_type === "SANDBOX_ITERATION" && event.payload.passed === true) || completed ? "complete" : failed ? "failed" : events.some((event) => event.event_type === "ARTIFACTS_READY") ? "active" : "pending";

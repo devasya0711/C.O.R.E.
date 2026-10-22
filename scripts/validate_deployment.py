@@ -31,6 +31,7 @@ def validate_backend_dockerfile() -> None:
         "venv transfer",
     )
     _require(dockerfile, r"USER core", "non-root backend runtime")
+    _require(dockerfile, r"groupadd --gid 1000 core", "stable backend UID/GID")
     _require(dockerfile, r"ENTRYPOINT \[\"/app/docker-entrypoint\.sh\"\]", "entrypoint")
     _require(
         _read("backend/docker-entrypoint.sh"),
@@ -45,6 +46,12 @@ def validate_frontend_dockerfile() -> None:
         _require(dockerfile, rf"^FROM .* AS {stage}$", f"frontend {stage} stage")
     _require(dockerfile, r"npm ci", "lockfile-based frontend install")
     _require(dockerfile, r"USER node", "non-root frontend runtime")
+
+
+def validate_sandbox_dockerfile() -> None:
+    dockerfile = _read("backend/sandbox.Dockerfile")
+    _require(dockerfile, r"USER sandbox", "non-root sandbox runtime")
+    _require(dockerfile, r"groupadd --gid 1000 sandbox", "stable sandbox UID/GID")
 
 
 def validate_compose() -> None:
@@ -69,6 +76,17 @@ def validate_compose() -> None:
             f"backend health dependency for {dependency}",
         )
     _require(compose, r"SANDBOX_DOCKER_IMAGE", "sandbox image setting")
+    _require(compose, r"SANDBOX_DOCKER_NOFILE_LIMIT", "sandbox nofile setting")
+    _require(
+        compose,
+        r"SANDBOX_DOCKER_WORKSPACE_ROOT",
+        "sandbox workspace setting",
+    )
+    _require(
+        compose,
+        r"SANDBOX_WORKSPACE_ROOT.*SANDBOX_WORKSPACE_ROOT.*:rw",
+        "same-path sandbox workspace bind",
+    )
     _require(
         compose,
         r"SANDBOX_REQUIRE_DOCKER: \$\{SANDBOX_REQUIRE_DOCKER:-true\}",
@@ -77,6 +95,37 @@ def validate_compose() -> None:
     _require(compose, r"/var/run/docker\.sock", "Docker socket mount")
     _require(compose, r"DOCKER_GID", "Docker socket group setting")
     _require(compose, r"redis-cli.*ping", "Redis healthcheck")
+    sandbox_section = compose.split("  sandbox:", 1)[1].split("  backend:", 1)[0]
+    if "/var/run/docker.sock" in sandbox_section:
+        raise AssertionError("sandbox service must not receive the Docker socket")
+    if re.search(r"(?m)^\s*-\s+[^\n]*:/tmp(?::|$)", compose):
+        raise AssertionError("Compose must not mount the host /tmp directory")
+
+
+def validate_sandbox_runner_contract() -> None:
+    runner = _read("backend/app/services/sandbox_runner.py")
+    _require(runner, r'"--network=none"', "sandbox network isolation")
+    _require(runner, r'"--name", container_name', "named sandbox container")
+    _require(runner, r'"--rm"', "automatic sandbox container cleanup")
+    _require(runner, r'"--ulimit"', "sandbox file-descriptor cap")
+    _require(runner, r'"--user",', "sandbox non-root UID mapping")
+    _require(runner, r'"rm", "--force", container_name', "timeout container cleanup")
+    _require(
+        runner,
+        r"TemporaryDirectory\(\s*prefix=\"core-sandbox-\",\s*dir=str\(workspace_root\)",
+        "daemon-visible shared workspace creation",
+    )
+    if re.search(r"type=bind,src=/tmp", runner):
+        raise AssertionError("sandbox runner must not bind the host /tmp directory")
+
+
+def validate_sandbox_configuration() -> None:
+    env = _read(".env.example")
+    _require(
+        env, r"^SANDBOX_WORKSPACE_ROOT=/absolute/path/", "sandbox root prerequisite"
+    )
+    _require(env, r"^SANDBOX_BACKEND_UID=", "sandbox backend UID setting")
+    _require(env, r"^SANDBOX_BACKEND_GID=", "sandbox backend GID setting")
 
 
 def validate_ci_and_readme() -> None:
@@ -99,7 +148,10 @@ def main() -> int:
     validators = (
         validate_backend_dockerfile,
         validate_frontend_dockerfile,
+        validate_sandbox_dockerfile,
         validate_compose,
+        validate_sandbox_runner_contract,
+        validate_sandbox_configuration,
         validate_ci_and_readme,
     )
     try:

@@ -94,6 +94,8 @@ services:
       SANDBOX_DOCKER_MEMORY_MB: ${SANDBOX_DOCKER_MEMORY_MB:-512}
       SANDBOX_DOCKER_CPUS: ${SANDBOX_DOCKER_CPUS:-1.0}
       SANDBOX_DOCKER_PIDS_LIMIT: ${SANDBOX_DOCKER_PIDS_LIMIT:-256}
+      SANDBOX_DOCKER_NOFILE_LIMIT: ${SANDBOX_DOCKER_NOFILE_LIMIT:-256}
+      SANDBOX_DOCKER_WORKSPACE_ROOT: ${SANDBOX_WORKSPACE_ROOT:?Set SANDBOX_WORKSPACE_ROOT to a dedicated shared host directory}
       SANDBOX_REQUIRE_DOCKER: ${SANDBOX_REQUIRE_DOCKER:-true}
       GITHUB_TIMEOUT_SECONDS: ${GITHUB_TIMEOUT_SECONDS:-15}
       SAMPLE_MONOLITH_PATH: /sample_monolith
@@ -102,7 +104,9 @@ services:
       INGESTION_MAX_SOURCE_BYTES: ${INGESTION_MAX_SOURCE_BYTES:-104857600}
     volumes:
       - ./sample_monolith:/sample_monolith:ro
+      - "${SANDBOX_WORKSPACE_ROOT:?Set SANDBOX_WORKSPACE_ROOT to a dedicated shared host directory}:${SANDBOX_WORKSPACE_ROOT:?Set SANDBOX_WORKSPACE_ROOT to a dedicated shared host directory}:rw"
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+    user: "${SANDBOX_BACKEND_UID:-1000}:${SANDBOX_BACKEND_GID:-1000}"
     group_add:
       - "${DOCKER_GID:-0}"
     depends_on:

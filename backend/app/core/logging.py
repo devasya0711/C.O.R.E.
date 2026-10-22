@@ -8,10 +8,11 @@ import logging as std_logging
 import re
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from typing import Any
 from uuid import uuid4
+
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.redaction import SecretRedactor
 
@@ -35,9 +36,18 @@ _SENSITIVE_FIELD_PATTERN = re.compile(
     r"database_url|redis_url|neo4j_uri|connection_url)(?:$|[_-])",
     re.IGNORECASE,
 )
+_EXCEPTION_FIELD_PATTERN = re.compile(
+    r"^(?:exception|exception[_-]?message|exc|traceback|stack)$", re.IGNORECASE
+)
 _STANDARD_RECORD_FIELDS = frozenset(
     std_logging.LogRecord("", 0, "", 0, "", (), None).__dict__
 )
+_REQUEST_ID_SCOPE_KEY = "core.request_id"
+_ACTIVE_REDACTOR = SecretRedactor()
+_ORIGINAL_RECORD_FACTORY: Callable[..., std_logging.LogRecord] = (
+    std_logging.getLogRecordFactory()
+)
+_RECORD_FACTORY_INSTALLED = False
 
 
 def get_request_id() -> str | None:
@@ -52,6 +62,17 @@ def request_id_from_header(value: str | None) -> str:
     if value is not None and _REQUEST_ID_PATTERN.fullmatch(value):
         return value
     return str(uuid4())
+
+
+def ensure_request_id(scope: Scope) -> str:
+    """Return and persist the correlation ID for an ASGI request scope."""
+
+    existing = scope.get(_REQUEST_ID_SCOPE_KEY)
+    if isinstance(existing, str) and _REQUEST_ID_PATTERN.fullmatch(existing):
+        return existing
+    request_id = request_id_from_header(_request_header(scope, b"x-request-id"))
+    scope[_REQUEST_ID_SCOPE_KEY] = request_id
+    return request_id
 
 
 def _redact_text(value: str, redactor: SecretRedactor) -> str:
@@ -70,8 +91,12 @@ def _redact_text(value: str, redactor: SecretRedactor) -> str:
 def _safe_value(value: object, redactor: SecretRedactor, field_name: str) -> object:
     """Convert an arbitrary logging value into redacted JSON-compatible data."""
 
-    if _SENSITIVE_FIELD_PATTERN.search(field_name):
+    if _SENSITIVE_FIELD_PATTERN.search(field_name) or (
+        _EXCEPTION_FIELD_PATTERN.fullmatch(field_name) is not None
+    ):
         return "[REDACTED]"
+    if isinstance(value, BaseException):
+        return type(value).__name__
     if isinstance(value, Mapping):
         return {
             str(key): _safe_value(item, redactor, str(key))
@@ -86,6 +111,83 @@ def _safe_value(value: object, redactor: SecretRedactor, field_name: str) -> obj
     return _redact_text(str(value), redactor)
 
 
+def _sanitize_record(record: std_logging.LogRecord, redactor: SecretRedactor) -> None:
+    """Sanitize a record before any configured handler can render it."""
+
+    try:
+        message = record.getMessage()
+    except (KeyError, TypeError, ValueError):
+        message = str(record.msg)
+    record.msg = _redact_text(message, redactor)
+    record.args = ()
+
+    if record.exc_info is not None:
+        exception = record.exc_info[1]
+        if isinstance(exception, BaseException):
+            record.exception_type = type(exception).__name__
+        record.exc_info = None
+    record.exc_text = None
+    record.stack_info = None
+
+    for key, value in list(record.__dict__.items()):
+        if key in _STANDARD_RECORD_FIELDS or key.startswith("_"):
+            continue
+        if key == "exception_type" and isinstance(value, str):
+            continue
+        setattr(record, key, _safe_value(value, redactor, key))
+
+
+def _redacting_record_factory(*args: object, **kwargs: object) -> std_logging.LogRecord:
+    """Create records that are safe for every current and future handler."""
+
+    record = _ORIGINAL_RECORD_FACTORY(*args, **kwargs)
+    _sanitize_record(record, _ACTIVE_REDACTOR)
+    return record
+
+
+class _RedactionFilter(std_logging.Filter):
+    """Apply the active redactor to handlers that already exist."""
+
+    _core_redaction_filter = True
+
+    def __init__(self, redactor: SecretRedactor) -> None:
+        super().__init__()
+        self.redactor = redactor
+
+    def filter(self, record: std_logging.LogRecord) -> bool:
+        _sanitize_record(record, self.redactor)
+        return True
+
+
+def _all_handlers() -> list[std_logging.Handler]:
+    """Return existing handlers without removing or replacing user handlers."""
+
+    root = std_logging.getLogger()
+    handlers = list(root.handlers)
+    for logger in std_logging.Logger.manager.loggerDict.values():
+        if isinstance(logger, std_logging.Logger):
+            handlers.extend(logger.handlers)
+    return handlers
+
+
+def _install_record_redaction(redactor: SecretRedactor) -> None:
+    """Protect existing handlers and install the process-wide record factory."""
+
+    global _ACTIVE_REDACTOR, _RECORD_FACTORY_INSTALLED
+    _ACTIVE_REDACTOR = redactor
+    if not _RECORD_FACTORY_INSTALLED:
+        std_logging.setLogRecordFactory(_redacting_record_factory)
+        _RECORD_FACTORY_INSTALLED = True
+
+    for handler in _all_handlers():
+        for current_filter in handler.filters:
+            if isinstance(current_filter, _RedactionFilter):
+                current_filter.redactor = redactor
+                break
+        else:
+            handler.addFilter(_RedactionFilter(redactor))
+
+
 class JsonFormatter(std_logging.Formatter):
     """Emit one redacted JSON object per log record using only the stdlib."""
 
@@ -96,6 +198,7 @@ class JsonFormatter(std_logging.Formatter):
     def format(self, record: std_logging.LogRecord) -> str:
         """Serialize the record and its structured extras as a JSON object."""
 
+        _sanitize_record(record, self.redactor)
         payload: dict[str, object] = {
             "timestamp": datetime.now(UTC)
             .isoformat(timespec="milliseconds")
@@ -109,12 +212,9 @@ class JsonFormatter(std_logging.Formatter):
             if key in _STANDARD_RECORD_FIELDS or key.startswith("_"):
                 continue
             payload[key] = _safe_value(value, self.redactor, key)
-        if record.exc_info is not None:
-            payload["exception"] = _redact_text(
-                self.formatException(record.exc_info), self.redactor
-            )
-        if record.stack_info is not None:
-            payload["stack"] = _redact_text(record.stack_info, self.redactor)
+        exception_type = getattr(record, "exception_type", None)
+        if isinstance(exception_type, str):
+            payload["exception_type"] = exception_type
         return json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
 
 
@@ -122,6 +222,7 @@ def configure_logging(settings: object | None = None) -> None:
     """Install the process-wide JSON handler without adding a dependency."""
 
     redactor = SecretRedactor.from_settings(settings)
+    _install_record_redaction(redactor)
     root = std_logging.getLogger()
     root.setLevel(std_logging.INFO)
     for handler in root.handlers:
@@ -137,30 +238,34 @@ def configure_logging(settings: object | None = None) -> None:
 class RequestLoggingMiddleware:
     """Correlate HTTP requests and emit a redacted completion log."""
 
-    def __init__(self, app: Any) -> None:
+    def __init__(self, app: ASGIApp) -> None:
         self.app = app
         self.logger = std_logging.getLogger("app.http")
 
-    async def __call__(self, scope: dict[str, object], receive: Any, send: Any) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
 
-        request_id = request_id_from_header(_request_header(scope, b"x-request-id"))
+        request_id = ensure_request_id(scope)
         token = _REQUEST_ID.set(request_id)
         started = time.perf_counter()
         status_code = 500
         response_started = False
+        request_failed = False
 
-        async def send_with_request_id(message: dict[str, object]) -> None:
+        async def send_with_request_id(message: Message) -> None:
             nonlocal response_started, status_code
             if message.get("type") == "http.response.start":
                 response_started = True
                 raw_status = message.get("status")
                 if isinstance(raw_status, int):
                     status_code = raw_status
-                headers = message.setdefault("headers", [])
-                if isinstance(headers, list) and not any(
+                headers = message.get("headers")
+                if not isinstance(headers, list):
+                    headers = list(headers) if isinstance(headers, tuple) else []
+                    message["headers"] = headers
+                if not any(
                     isinstance(header, (tuple, list))
                     and len(header) >= 2
                     and isinstance(header[0], bytes)
@@ -173,10 +278,12 @@ class RequestLoggingMiddleware:
         try:
             await self.app(scope, receive, send_with_request_id)
         except BaseException:
+            request_failed = True
             self.logger.exception(
                 "request_failed",
                 extra={
                     "event": "http_request",
+                    "request_id": request_id,
                     "method": _scope_value(scope, "method"),
                     "path": _scope_value(scope, "path"),
                     "status_code": status_code,
@@ -189,15 +296,14 @@ class RequestLoggingMiddleware:
             latency_ms = _elapsed_ms(started)
             extra = {
                 "event": "http_request",
+                "request_id": request_id,
                 "method": _scope_value(scope, "method"),
                 "path": _scope_value(scope, "path"),
                 "status_code": status_code,
                 "latency_ms": latency_ms,
                 "response_started": response_started,
             }
-            if status_code >= 500:
-                self.logger.warning("request_completed", extra=extra)
-            else:
+            if not request_failed:
                 self.logger.info("request_completed", extra=extra)
             _REQUEST_ID.reset(token)
 

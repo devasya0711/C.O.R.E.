@@ -9,16 +9,18 @@ from pathlib import Path
 
 try:
     from .maintenance_common import (
-        ensure_directory,
+        maintenance_child_environment,
         parse_neo4j_database,
         run_command,
+        validate_neo4j_restore_input,
         validate_restore_confirmation,
     )
 except ImportError:  # pragma: no cover - direct script execution
     from maintenance_common import (
-        ensure_directory,
+        maintenance_child_environment,
         parse_neo4j_database,
         run_command,
+        validate_neo4j_restore_input,
         validate_restore_confirmation,
     )
 
@@ -50,10 +52,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         validate_restore_confirmation(args.yes_i_really_mean_it)
         database = parse_neo4j_database(args.database)
-        ensure_directory(args.input_dir)
+        validate_neo4j_restore_input(args.input_dir)
         run_command(
             build_command(args.neo4j_admin, database, args.input_dir),
-            os.environ.copy(),
+            maintenance_child_environment(),
             "neo4j-admin load",
         )
     except (OSError, RuntimeError, ValueError) as error:

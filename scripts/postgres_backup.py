@@ -10,7 +10,7 @@ from pathlib import Path
 try:
     from .maintenance_common import (
         PostgresTarget,
-        ensure_directory,
+        atomic_backup_file,
         parse_postgres_url,
         postgres_connection_args,
         postgres_environment,
@@ -19,7 +19,7 @@ try:
 except ImportError:  # pragma: no cover - direct script execution
     from maintenance_common import (
         PostgresTarget,
-        ensure_directory,
+        atomic_backup_file,
         parse_postgres_url,
         postgres_connection_args,
         postgres_environment,
@@ -57,11 +57,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not raw_url:
             raise ValueError(f"{args.database_url_env} is not set")
         target = parse_postgres_url(raw_url)
-        if args.output.exists() and not args.force:
-            raise ValueError("backup output already exists; pass --force to replace it")
-        ensure_directory(args.output.parent)
-        with postgres_environment(target) as environment:
-            run_command(build_command(target, args.output), environment, "pg_dump")
+        with (
+            atomic_backup_file(args.output, args.force) as temporary_output,
+            postgres_environment(target) as environment,
+        ):
+            run_command(
+                build_command(target, temporary_output),
+                environment,
+                "pg_dump",
+                (target.password,) if target.password is not None else (),
+            )
     except (OSError, RuntimeError, ValueError) as error:
         parser.error(str(error))
     print("PostgreSQL backup completed.")

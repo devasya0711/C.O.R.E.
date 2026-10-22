@@ -115,7 +115,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.migration_tasks = set()
     configure_logging(application.state.settings)
     install_error_handlers(application)
-    application.add_middleware(RequestLoggingMiddleware)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=application.state.settings.cors_origins,
@@ -129,6 +128,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ],
         expose_headers=["Retry-After", "X-Request-ID"],
     )
+    application.add_middleware(RequestLoggingMiddleware)
     application.include_router(health_router, prefix="/api/v1")
     protected = APIRouter(
         prefix="/api/v1",

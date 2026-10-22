@@ -754,7 +754,9 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
   documented `TEST_DATABASE_URL`, `TEST_REDIS_URL`, and `TEST_NEO4J_URI`
   services. The local parameterized-query, ownership, rate-limit contract,
   CORS, and cleanup regressions still ran successfully.
-- [ ] No commit or push was performed, per the Batch 9 task instruction.
+- [x] Batch 9 implementation was committed locally as `2908a82`.
+- [ ] The commit was not pushed from this environment because GitHub
+  authentication is unavailable; `gh auth status` reports no logged-in host.
 
 ### Batch 10 — Prompt 17: Code Review & Refactoring
 
@@ -781,6 +783,9 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - Repository locking is shared between analysis and migration routers, and
   affected React Flow edges use the documented dashed style. The migration
   stepper includes all seven documented stages.
+- [x] Batch 10 implementation was committed locally as `bee3b87`.
+- [ ] The commit remains ahead of `origin/main` until GitHub authentication is
+  restored.
 
 ### Batch 11 — Prompt 18: Deployment & Production Setup
 
@@ -814,7 +819,9 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
   could not be exercised here because the Docker CLI/daemon is unavailable.
   CI remains the executable Docker verification path; no local Docker success
   is claimed.
-- [ ] No commit or push was performed, per the Batch 11 task instruction.
+- [x] Batch 11 implementation was committed locally as `6c2897a`.
+- [ ] The commit remains ahead of `origin/main` until GitHub authentication is
+  restored.
 
 ### Batch 12 — Prompt 19: Production Monitoring & Maintenance
 
@@ -847,6 +854,10 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - [ ] Live backup/restore, Docker execution, and production log shipping were
   not exercised because PostgreSQL, Neo4j, Docker, and hosted observability
   services are unavailable in this workspace.
+- [x] Batch 12 implementation was committed locally as `5500c05` before the
+  final-audit fixes.
+- [ ] The commit and the final-audit changes remain ahead of `origin/main`
+  until GitHub authentication is restored.
 
 ### Batch 13 — Prompt 20: Final Production Audit
 
@@ -857,6 +868,35 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
   backend and frontend checks; verify clean author-attributed pushed history.
 - **Completion:** Publish a launch verdict of `READY`, `READY WITH WARNINGS`,
   or `NOT READY`, with test results and the final verification checklist.
+
+#### Batch 13 final audit record — October 22, 2026
+
+- **Verdict: NOT READY.** The portable implementation and deterministic
+  regression suites are healthy, but production launch criteria are not fully
+  verifiable in this workspace.
+- Backend verification after the final-audit fixes: **412 passed, 104 skipped,
+  1 warning** under Python 3.12. The skips require disposable PostgreSQL,
+  Redis, or Neo4j services through the documented `TEST_*` variables.
+- Frontend verification passed with the maintained Next.js 15 line: typecheck,
+  lint, unit tests (**11 passed**), production build, and production-auth smoke
+  tests (**3 passed**). A Clerk deprecation warning remains.
+- Deployment descriptor validation, strict backend mypy, Ruff, Ruff format, and
+  `git diff --check` passed. Docker image builds, Compose startup, Alembic
+  cold-start, Docker sandbox execution, and healthchecks could not run because
+  the Docker CLI/daemon is unavailable.
+- The final Docker sandbox audit fixed daemon-visible workspace mapping, named
+  container cleanup, resource caps, nofile limits, and non-root UID mapping.
+  These changes still require a live Docker verification.
+- The frontend dependency audit reports **0 vulnerabilities** for the attempted
+  Next.js 16 upgrade, but that upgrade breaks the existing auth test harness and
+  requires broader migration work. The maintained Next.js 15 lockfile retains
+  one high and one moderate PostCSS advisory; this is a launch warning/blocker
+  requiring a planned dependency upgrade or explicit risk acceptance.
+- Current local history contains the verified batch commits, but the branch is
+  not synchronized with GitHub until authentication is restored and the local
+  commits are pushed. This also prevents remote CI confirmation.
+
+The complete checklist and evidence are summarized in `docs/FINAL_AUDIT.md`.
 
 ## Requirement-to-batch checklist
 

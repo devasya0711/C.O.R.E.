@@ -55,6 +55,27 @@ async def test_required_docker_isolation_fails_closed_without_docker() -> None:
 
 
 @pytest.mark.asyncio
+async def test_docker_requires_a_daemon_visible_shared_workspace(
+    tmp_path: Path,
+) -> None:
+    fake_docker = tmp_path / "docker"
+    fake_docker.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_docker.chmod(0o700)
+    runner = SandboxRunnerService(
+        SandboxRunnerConfig(
+            docker_executable=str(fake_docker),
+            require_docker=True,
+        )
+    )
+
+    with pytest.raises(
+        SandboxIsolationUnavailable,
+        match="explicit shared workspace root",
+    ):
+        await runner.run({})
+
+
+@pytest.mark.asyncio
 async def test_sample_monolith_checkout_runs_in_isolated_copy() -> None:
     source = Path(__file__).resolve().parents[2] / "sample_monolith"
     runner = _runner().with_source(source, subdirectory="sample_monolith")
@@ -196,6 +217,7 @@ def test_docker_command_applies_bounded_resource_flags(tmp_path: Path) -> None:
         docker_memory_mb=384,
         docker_cpus=0.5,
         docker_pids_limit=96,
+        docker_nofile_limit=128,
     )
 
     command = runner._command(tmp_path, "/usr/bin/docker")
@@ -204,6 +226,110 @@ def test_docker_command_applies_bounded_resource_flags(tmp_path: Path) -> None:
     assert "--memory-swap=384m" in command
     assert "--cpus=0.5" in command
     assert "--pids-limit=96" in command
+    assert "nofile=128:128" in command
+    assert "--user" in command
+
+
+@pytest.mark.asyncio
+async def test_docker_workspace_uses_shared_root_and_force_removes_on_timeout(
+    tmp_path: Path,
+) -> None:
+    shared_root = tmp_path / "shared-workspaces"
+    shared_root.mkdir()
+    run_marker = tmp_path / "run-seen"
+    remove_marker = tmp_path / "remove-seen"
+    fake_docker = tmp_path / "docker"
+    fake_docker.write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib, sys, time\n"
+        f"run_marker = pathlib.Path({str(run_marker)!r})\n"
+        f"remove_marker = pathlib.Path({str(remove_marker)!r})\n"
+        "args = sys.argv[1:]\n"
+        "if args[0] == 'run':\n"
+        "    mount = next(value for value in args if value.startswith('type=bind'))\n"
+        "    source = pathlib.Path(mount.split('src=', 1)[1].split(',', 1)[0])\n"
+        f"    assert source.parent == pathlib.Path({str(shared_root)!r})\n"
+        "    assert source.is_dir()\n"
+        "    run_marker.write_text(str(source), encoding='utf-8')\n"
+        "    time.sleep(30)\n"
+        "elif args[0] == 'rm':\n"
+        "    remove_marker.write_text(' '.join(args), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    fake_docker.chmod(0o700)
+
+    runner = SandboxRunnerService(
+        SandboxRunnerConfig(
+            docker_executable=str(fake_docker),
+            docker_workspace_root=shared_root,
+            require_docker=True,
+            timeout_seconds=0.1,
+        )
+    )
+    result = await runner.run(
+        {"tests/test_timeout.py": "def test_timeout() -> None:\n    assert True\n"}
+    )
+
+    assert result.timed_out is True
+    assert run_marker.read_text(encoding="utf-8").startswith(str(shared_root))
+    assert remove_marker.read_text(encoding="utf-8").startswith(
+        "rm --force core-sandbox-"
+    )
+    assert not any(shared_root.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_docker_cancellation_force_removes_named_container(
+    tmp_path: Path,
+) -> None:
+    shared_root = tmp_path / "shared-workspaces"
+    shared_root.mkdir()
+    run_marker = tmp_path / "run-seen"
+    remove_marker = tmp_path / "remove-seen"
+    fake_docker = tmp_path / "docker"
+    fake_docker.write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib, sys, time\n"
+        f"run_marker = pathlib.Path({str(run_marker)!r})\n"
+        f"remove_marker = pathlib.Path({str(remove_marker)!r})\n"
+        "args = sys.argv[1:]\n"
+        "if args[0] == 'run':\n"
+        "    mount = next(value for value in args if value.startswith('type=bind'))\n"
+        "    source = pathlib.Path(mount.split('src=', 1)[1].split(',', 1)[0])\n"
+        "    run_marker.write_text(str(source), encoding='utf-8')\n"
+        "    time.sleep(30)\n"
+        "elif args[0] == 'rm':\n"
+        "    remove_marker.write_text(' '.join(args), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    fake_docker.chmod(0o700)
+    runner = SandboxRunnerService(
+        SandboxRunnerConfig(
+            docker_executable=str(fake_docker),
+            docker_workspace_root=shared_root,
+            require_docker=True,
+            timeout_seconds=30,
+        )
+    )
+
+    task = asyncio.create_task(runner.run({}))
+    for _ in range(20):
+        if run_marker.exists():
+            break
+        await asyncio.sleep(0.01)
+    else:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        pytest.fail("fake Docker run did not start")
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert remove_marker.read_text(encoding="utf-8").startswith(
+        "rm --force core-sandbox-"
+    )
+    assert not any(shared_root.iterdir())
 
 
 @pytest.mark.parametrize(
@@ -215,6 +341,8 @@ def test_docker_command_applies_bounded_resource_flags(tmp_path: Path) -> None:
         ("docker_cpus", 4.1),
         ("docker_pids_limit", 31),
         ("docker_pids_limit", 4097),
+        ("docker_nofile_limit", 63),
+        ("docker_nofile_limit", 65537),
     ],
 )
 def test_docker_resource_configuration_is_bounded(field: str, value: object) -> None:

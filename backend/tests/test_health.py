@@ -12,6 +12,10 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 
+def _settings() -> Settings:
+    return Settings(_env_file=None)  # type: ignore[call-arg]
+
+
 def test_health_returns_200_when_all_stores_respond(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -25,9 +29,12 @@ def test_health_returns_200_when_all_stores_respond(
                 )
             ),
         )
-    with TestClient(create_app(Settings(_env_file=None))) as client:
-        response = client.get("/api/v1/health")
+    with TestClient(create_app(_settings())) as client:
+        response = client.get(
+            "/api/v1/health", headers={"X-Request-ID": "healthy-request"}
+        )
     assert response.status_code == 200
+    assert response.headers["x-request-id"] == "healthy-request"
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["postgres_ms"] == 2.5
@@ -37,9 +44,12 @@ def test_health_returns_200_when_all_stores_respond(
 
 
 def test_missing_configuration_is_not_reported_as_healthy() -> None:
-    with TestClient(create_app(Settings(_env_file=None))) as client:
-        response = client.get("/api/v1/health")
+    with TestClient(create_app(_settings())) as client:
+        response = client.get(
+            "/api/v1/health", headers={"X-Request-ID": "degraded-request"}
+        )
     assert response.status_code == 503
+    assert response.headers["x-request-id"] == "degraded-request"
     components = response.json()["error"]["details"]["components"]
     assert set(components) == {"postgres", "neo4j", "redis"}
     assert all(item["status"] == "not_configured" for item in components.values())
@@ -77,7 +87,7 @@ def test_one_unhealthy_store_returns_503_with_component_diagnostics(
         ),
     )
 
-    with TestClient(create_app(Settings(_env_file=None))) as client:
+    with TestClient(create_app(_settings())) as client:
         response = client.get("/api/v1/health")
 
     assert response.status_code == 503
@@ -92,7 +102,7 @@ def test_one_unhealthy_store_returns_503_with_component_diagnostics(
 
 
 def test_protected_endpoint_rejects_missing_token_without_store_access() -> None:
-    with TestClient(create_app(Settings(_env_file=None))) as client:
+    with TestClient(create_app(_settings())) as client:
         response = client.put(
             "/api/v1/settings/github-token", json={"token": "test-only"}
         )
@@ -102,7 +112,7 @@ def test_protected_endpoint_rejects_missing_token_without_store_access() -> None
 
 
 def test_cors_allows_only_configured_origins() -> None:
-    with TestClient(create_app(Settings(_env_file=None))) as client:
+    with TestClient(create_app(_settings())) as client:
         origins = [("http://localhost:3000", 200), ("https://evil.test", 400)]
         for origin, expected in origins:
             response = client.options(
@@ -111,9 +121,11 @@ def test_cors_allows_only_configured_origins() -> None:
                     "Origin": origin,
                     "Access-Control-Request-Method": "PUT",
                     "Access-Control-Request-Headers": "authorization",
+                    "X-Request-ID": f"preflight-{expected}",
                 },
             )
             assert response.status_code == expected
+            assert response.headers["x-request-id"] == f"preflight-{expected}"
             if expected == 200:
                 assert response.headers["access-control-allow-origin"] == origin
             else:
@@ -121,7 +133,7 @@ def test_cors_allows_only_configured_origins() -> None:
 
 
 def test_all_resource_api_routes_require_server_identity() -> None:
-    application = create_app(Settings(_env_file=None))
+    application = create_app(_settings())
     for route in application.routes:
         if isinstance(route, APIRoute) and route.path != "/api/v1/health":
             assert get_current_user in {

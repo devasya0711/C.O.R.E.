@@ -10,6 +10,8 @@ from scripts.maintenance_common import (
     parse_postgres_url,
     postgres_connection_args,
     postgres_environment,
+    validate_neo4j_restore_input,
+    validate_postgres_restore_input,
     validate_restore_confirmation,
 )
 from scripts.neo4j_backup import build_command as build_neo4j_backup_command
@@ -75,3 +77,51 @@ def test_postgres_connection_args_exclude_password() -> None:
         "--dbname",
         "core",
     ]
+
+
+def test_postgres_environment_overrides_inherited_connection_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = parse_postgres_url("postgresql://user:secret@db:5432/core")
+    for key, value in {
+        "DATABASE_URL": "postgresql://wrong",
+        "PGHOST": "wrong-host",
+        "PGPASSWORD": "wrong-password",
+        "PGSERVICE": "wrong-service",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    with postgres_environment(target) as environment:
+        assert all(
+            key not in environment
+            for key in ("DATABASE_URL", "PGHOST", "PGPASSWORD", "PGSERVICE")
+        )
+        assert "PGPASSFILE" in environment
+
+
+def test_postgres_target_repr_and_database_name_reject_unsafe_values() -> None:
+    target = parse_postgres_url("postgresql://user:secret@db:5432/core")
+    assert "secret" not in repr(target)
+    with pytest.raises(ValueError):
+        parse_postgres_url("postgresql://user:secret@db:5432/core=drop")
+    with pytest.raises(ValueError):
+        parse_postgres_url("postgresql://user:secret@db:5432/core%00name")
+
+
+def test_restore_inputs_require_private_expected_artifacts(tmp_path: Path) -> None:
+    postgres_dump = tmp_path / "core.dump"
+    postgres_dump.write_bytes(b"PGDMP\x01fixture")
+    postgres_dump.chmod(0o600)
+    validate_postgres_restore_input(postgres_dump)
+
+    neo4j_dump = tmp_path / "neo4j"
+    neo4j_dump.mkdir(mode=0o700)
+    archive = neo4j_dump / "neo4j.dump"
+    archive.write_bytes(b"fixture")
+    archive.chmod(0o600)
+    validate_neo4j_restore_input(neo4j_dump)
+
+    with pytest.raises(ValueError):
+        validate_postgres_restore_input(tmp_path / "missing.dump")
+    with pytest.raises(ValueError):
+        validate_neo4j_restore_input(tmp_path / "missing-dir")

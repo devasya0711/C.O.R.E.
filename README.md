@@ -32,7 +32,26 @@ The backend applies `alembic upgrade head` before Uvicorn starts. Compose waits
 for PostgreSQL, Neo4j, Redis, and the prebuilt sandbox image healthchecks before
 starting the API; the frontend waits for the API healthcheck. The sandbox image
 is built from `backend/sandbox.Dockerfile` and is invoked through the Docker
-socket with bounded memory, CPU, PID, output, and timeout settings.
+socket with bounded memory, CPU, PID, file-descriptor, output, and timeout
+settings.
+
+### Docker sandbox workspace prerequisite
+
+The backend container and the Docker daemon must see the sandbox workspace at
+the **same absolute path**. Docker bind sources are resolved by the daemon,
+not by the backend container, so a backend-only `/tmp/core-sandbox-*` directory
+cannot be used. Set `SANDBOX_WORKSPACE_ROOT` to a dedicated host directory and
+make it writable by `SANDBOX_BACKEND_UID:GID`; do not point it at `/tmp`, the
+project root, or a shared host directory. The Compose configuration mounts only
+that directory at the identical path and never mounts the full host `/tmp`.
+
+The backend uses the host Docker socket only to create the short-lived sandbox
+container. The sandbox itself has `--network=none`, drops capabilities, uses a
+read-only root filesystem with a bounded tmpfs, and receives an explicit
+allowlisted environment. Production requires Docker isolation and fails closed
+when the shared workspace or Docker daemon is unavailable. Direct development
+subprocess runs remain available when Docker is not configured, with their
+reduced-isolation result recorded and automatic PR publication blocked.
 
 ## Feature walkthrough
 
@@ -59,6 +78,7 @@ ignored `.env` file. They do not create or commit production credentials.
 cp .env.example .env
 python - <<'PY'
 import base64
+import os
 import re
 import secrets
 from pathlib import Path
@@ -71,6 +91,8 @@ neo4j_password = secrets.token_urlsafe(24)
 fernet_key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
 docker_socket = Path("/var/run/docker.sock")
 docker_gid = str(docker_socket.stat().st_gid) if docker_socket.exists() else "0"
+sandbox_workspace = Path(".core-sandbox-workspaces").resolve()
+sandbox_workspace.mkdir(mode=0o700, parents=True, exist_ok=True)
 replacements = {
     "POSTGRES_PASSWORD": postgres_password,
     "NEO4J_PASSWORD": neo4j_password,
@@ -80,6 +102,9 @@ replacements = {
     ),
     "ENCRYPTION_SECRET_KEY": fernet_key,
     "DOCKER_GID": docker_gid,
+    "SANDBOX_WORKSPACE_ROOT": str(sandbox_workspace),
+    "SANDBOX_BACKEND_UID": str(os.getuid()),
+    "SANDBOX_BACKEND_GID": str(os.getgid()),
 }
 for key, value in replacements.items():
     text = re.sub(rf"^{re.escape(key)}=.*$", f"{key}={value}", text, flags=re.MULTILINE)
@@ -96,6 +121,10 @@ healthcheck. The Compose stack binds PostgreSQL, Neo4j, and Redis to loopback
 only. `DOCKER_SOCKET_PATH` and `DOCKER_GID` in `.env` control how the backend
 reaches the host Docker engine for sandbox runs; on Linux, set `DOCKER_GID` to
 the group ID of `/var/run/docker.sock` when the default `0` is insufficient.
+`SANDBOX_WORKSPACE_ROOT` must remain an absolute path shared by the backend and
+daemon, and `SANDBOX_BACKEND_UID`/`SANDBOX_BACKEND_GID` must match its owner.
+On Docker Desktop or another remote daemon, use a path that is shared with that
+daemon and verify the daemon can access it before starting the stack.
 
 Clerk keys are required for authenticated browser/API flows. `OPENAI_API_KEY`
 is required for real embedding and LLM naming calls; the application reports
@@ -125,8 +154,8 @@ npm ci
 npm run typecheck
 npm run lint
 npm test
-npm run test:smoke
 npm run build
+npm run test:smoke
 ```
 
 Docker is unavailable in the current coding environment: the Docker CLI and

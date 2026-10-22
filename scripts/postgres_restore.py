@@ -14,6 +14,7 @@ try:
         postgres_connection_args,
         postgres_environment,
         run_command,
+        validate_postgres_restore_input,
         validate_restore_confirmation,
     )
 except ImportError:  # pragma: no cover - direct script execution
@@ -23,6 +24,7 @@ except ImportError:  # pragma: no cover - direct script execution
         postgres_connection_args,
         postgres_environment,
         run_command,
+        validate_postgres_restore_input,
         validate_restore_confirmation,
     )
 
@@ -58,11 +60,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         raw_url = os.environ.get(args.database_url_env)
         if not raw_url:
             raise ValueError(f"{args.database_url_env} is not set")
-        if not args.input.is_file():
-            raise ValueError("restore input must be an existing backup file")
+        validate_postgres_restore_input(args.input)
         target = parse_postgres_url(raw_url)
         with postgres_environment(target) as environment:
-            run_command(build_command(target, args.input), environment, "pg_restore")
+            run_command(
+                build_command(target, args.input),
+                environment,
+                "pg_restore",
+                (target.password,) if target.password is not None else (),
+            )
     except (OSError, RuntimeError, ValueError) as error:
         parser.error(str(error))
     print("PostgreSQL restore completed.")

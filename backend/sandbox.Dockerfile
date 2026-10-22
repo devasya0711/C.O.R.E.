@@ -10,4 +10,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN pip install --no-cache-dir --disable-pip-version-check \
     fastapi httpx pydantic pytest sqlalchemy
 
+RUN groupadd --gid 1000 sandbox \
+    && useradd --uid 1000 --gid sandbox --home-dir /home/sandbox \
+        --create-home --shell /usr/sbin/nologin sandbox
+
 WORKDIR /workspace
+
+USER sandbox

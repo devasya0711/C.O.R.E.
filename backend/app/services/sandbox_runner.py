@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from tempfile import TemporaryDirectory
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -39,6 +40,8 @@ class SandboxRunnerConfig(BaseModel):
     docker_memory_mb: int = Field(default=512, ge=128, le=2048)
     docker_cpus: float = Field(default=1.0, gt=0, le=4.0)
     docker_pids_limit: int = Field(default=256, ge=32, le=4096)
+    docker_nofile_limit: int = Field(default=256, ge=64, le=65536)
+    docker_workspace_root: Path | None = None
     require_docker: bool = False
 
     @field_validator("python_executable", "docker_executable", "docker_image")
@@ -50,6 +53,23 @@ class SandboxRunnerConfig(BaseModel):
         ):
             raise ValueError("command values must not contain whitespace or NUL bytes")
         return value
+
+    @field_validator("docker_workspace_root")
+    @classmethod
+    def validate_workspace_root(cls, value: Path | None) -> Path | None:
+        """Require an explicit, dedicated absolute directory for Docker binds."""
+        if value is None:
+            return None
+        if not value.expanduser().is_absolute():
+            raise ValueError(
+                "docker_workspace_root must be a dedicated absolute directory"
+            )
+        resolved = value.expanduser().resolve(strict=False)
+        if not resolved.is_absolute() or resolved in {Path("/"), Path("/tmp")}:
+            raise ValueError(
+                "docker_workspace_root must be a dedicated absolute directory"
+            )
+        return resolved
 
 
 class SandboxRequest(BaseModel):
@@ -125,12 +145,32 @@ class SandboxRunnerService:
             else SandboxRequest(artifacts=dict(artifacts))
         )
 
-        with TemporaryDirectory(prefix="core-sandbox-") as temporary:
+        docker_executable = self._docker_executable()
+        if docker_executable is not None and self.config.docker_workspace_root is None:
+            if self.config.require_docker:
+                raise SandboxIsolationUnavailable(
+                    "Docker sandbox isolation requires an explicit shared "
+                    "workspace root."
+                )
+            docker_executable = None
+        workspace_root = (
+            self.config.docker_workspace_root if docker_executable is not None else None
+        )
+        if workspace_root is not None and (
+            not workspace_root.is_dir()
+            or not os.access(workspace_root, os.W_OK | os.X_OK)
+        ):
+            raise SandboxIsolationUnavailable(
+                "Docker sandbox shared workspace root is unavailable or not writable."
+            )
+        with TemporaryDirectory(
+            prefix="core-sandbox-",
+            dir=str(workspace_root) if workspace_root is not None else None,
+        ) as temporary:
             workspace = Path(temporary)
             if self.source_root is not None:
                 self._copy_source(self.source_root, workspace)
             self._materialize(workspace, request.artifacts)
-            docker_executable = self._docker_executable()
             if docker_executable is None and self.config.require_docker:
                 raise SandboxIsolationUnavailable(
                     "Docker sandbox isolation is required but unavailable."
@@ -140,9 +180,17 @@ class SandboxRunnerService:
                 if docker_executable is not None
                 else SandboxIsolation.SUBPROCESS
             )
-            command = self._command(workspace, docker_executable)
+            container_name = (
+                f"core-sandbox-{uuid4().hex}" if docker_executable is not None else None
+            )
+            command = self._command(
+                workspace, docker_executable, container_name=container_name
+            )
+            cleanup_command = self._cleanup_command(docker_executable, container_name)
             environment = self._environment(workspace, isolation)
-            captured = await self._execute(command, workspace, environment)
+            captured = await self._execute(
+                command, workspace, environment, cleanup_command=cleanup_command
+            )
 
         return SandboxResult(
             passed=captured.return_code == 0 and not captured.timed_out,
@@ -174,11 +222,17 @@ class SandboxRunnerService:
             return None
         return shutil.which(self.config.docker_executable)
 
-    def _command(self, workspace: Path, docker_executable: str | None) -> list[str]:
+    def _command(
+        self,
+        workspace: Path,
+        docker_executable: str | None,
+        *,
+        container_name: str | None = None,
+    ) -> list[str]:
         if docker_executable is None:
             return [self.config.python_executable, "-m", "pytest"]
 
-        return [
+        command = [
             docker_executable,
             "run",
             "--rm",
@@ -186,6 +240,10 @@ class SandboxRunnerService:
             f"--memory-swap={self.config.docker_memory_mb}m",
             f"--cpus={self.config.docker_cpus:g}",
             f"--pids-limit={self.config.docker_pids_limit}",
+            "--ulimit",
+            f"nofile={self.config.docker_nofile_limit}:{self.config.docker_nofile_limit}",
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
             "--network=none",
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges",
@@ -215,6 +273,17 @@ class SandboxRunnerService:
             "-m",
             "pytest",
         ]
+        if container_name is not None:
+            command[3:3] = ["--name", container_name]
+        return command
+
+    @staticmethod
+    def _cleanup_command(
+        docker_executable: str | None, container_name: str | None
+    ) -> list[str] | None:
+        if docker_executable is None or container_name is None:
+            return None
+        return [docker_executable, "rm", "--force", container_name]
 
     def _environment(
         self, workspace: Path, isolation: SandboxIsolation
@@ -325,7 +394,12 @@ class SandboxRunnerService:
         return PurePosixPath(*parts)
 
     async def _execute(
-        self, command: list[str], workspace: Path, environment: dict[str, str]
+        self,
+        command: list[str],
+        workspace: Path,
+        environment: dict[str, str],
+        *,
+        cleanup_command: list[str] | None = None,
     ) -> _CapturedProcess:
         try:
             process = await asyncio.create_subprocess_exec(
@@ -354,6 +428,15 @@ class SandboxRunnerService:
             self._read_capped(process.stderr, self.config.max_output_bytes)
         )
         timed_out = False
+        cleanup_complete = False
+
+        async def cleanup_container() -> None:
+            nonlocal cleanup_complete
+            if cleanup_complete or cleanup_command is None:
+                return
+            cleanup_complete = True
+            await self._remove_container(cleanup_command, environment)
+
         try:
             try:
                 async with asyncio.timeout(self.config.timeout_seconds):
@@ -362,9 +445,11 @@ class SandboxRunnerService:
             except TimeoutError:
                 timed_out = True
                 await self._terminate_process_group(process)
+                await cleanup_container()
                 stdout, stderr = await self._finish_readers(stdout_task, stderr_task)
             except BaseException:
                 await self._terminate_process_group(process)
+                await cleanup_container()
                 stdout_task.cancel()
                 stderr_task.cancel()
                 await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
@@ -372,6 +457,9 @@ class SandboxRunnerService:
         finally:
             if process.returncode is None:
                 await self._terminate_process_group(process)
+                await cleanup_container()
+            elif process.returncode != 0:
+                await cleanup_container()
 
         return _CapturedProcess(
             return_code=process.returncode,
@@ -381,6 +469,30 @@ class SandboxRunnerService:
             stdout_truncated=stdout[1],
             stderr_truncated=stderr[1],
         )
+
+    async def _remove_container(
+        self, command: list[str], environment: dict[str, str]
+    ) -> None:
+        """Force-remove a named Docker container after CLI cancellation."""
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                env=environment,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError:
+            return
+
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except TimeoutError:
+            await self._terminate_process_group(process)
+        except BaseException:
+            await self._terminate_process_group(process)
+            raise
 
     async def _finish_readers(
         self,
