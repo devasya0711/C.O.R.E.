@@ -825,6 +825,29 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - **Completion:** Monitoring improvements are implemented, tested, committed,
   and pushed.
 
+#### Batch 12 implementation record
+
+- [x] Added dependency-free JSON logging with UTC timestamps, severity, logger,
+  request ID, structured fields, latency, and recursive credential redaction.
+- [x] Added `X-Request-ID` correlation middleware. Safe incoming IDs are
+  preserved; malformed or missing IDs are replaced with UUIDs and returned on
+  every HTTP response, including error responses.
+- [x] Added workflow agent telemetry for agent name, latency, status, retry
+  count, and `crag_retry_count`; health logs include component statuses and
+  dependency latency fields.
+- [x] Health now returns `200` only when PostgreSQL, Neo4j, and Redis are all
+  healthy. Missing or unhealthy dependencies return `503` with nested status,
+  detail, and latency diagnostics.
+- [x] Added credential-safe PostgreSQL custom-format backup/restore helpers,
+  offline Neo4j dump/load helpers, destructive-operation confirmation flags,
+  and `docs/OPERATIONS.md` recovery procedures.
+- [x] Focused monitoring and maintenance tests passed: **28 passed, 1
+  warning**. Backend Ruff and format checks passed, and strict mypy passed for
+  `backend/app`.
+- [ ] Live backup/restore, Docker execution, and production log shipping were
+  not exercised because PostgreSQL, Neo4j, Docker, and hosted observability
+  services are unavailable in this workspace.
+
 ### Batch 13 — Prompt 20: Final Production Audit
 
 - **Goal:** Approve C.O.R.E. for production launch and portfolio showcase.

@@ -396,6 +396,7 @@ async def test_warning_only_incomplete_context_fails_before_coding() -> None:
     assert coder.requests == []
     assert publisher.events[-2].event_type is MigrationEventType.CRAG_DECISION
     assert publisher.events[-2].payload["reasons"] == ["missing source context"]
+    assert publisher.events[-2].payload["crag_retry_count"] == 0
     assert publisher.events[-1].event_type is MigrationEventType.MIGRATION_FAILED
     assert publisher.events[-1].payload["reasons"] == ["missing source context"]
 
@@ -423,6 +424,12 @@ async def test_sandbox_retry_passes_stderr_back_to_the_coder() -> None:
     assert [event.event_type for event in publisher.events].count(
         MigrationEventType.SANDBOX_ITERATION
     ) == 2
+    crag_events = [
+        event
+        for event in publisher.events
+        if event.event_type is MigrationEventType.CRAG_DECISION
+    ]
+    assert crag_events[0].payload["crag_retry_count"] == 0
 
 
 @pytest.mark.asyncio

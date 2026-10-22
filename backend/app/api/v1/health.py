@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Literal
 
@@ -16,6 +17,7 @@ from app.core.errors import ApiError
 from app.db.redis import create_redis_client
 
 router = APIRouter(tags=["system"])
+_LOGGER = logging.getLogger(__name__)
 
 HealthState = Literal["healthy", "unhealthy", "not_configured"]
 
@@ -31,9 +33,12 @@ class ComponentHealth(BaseModel):
 class HealthResponse(BaseModel):
     """Stable response contract for the public health endpoint."""
 
-    status: Literal["ok", "degraded"]
+    status: Literal["ok"]
     version: str
     components: dict[str, ComponentHealth]
+    postgres_ms: float | None = Field(default=None, ge=0)
+    neo4j_ms: float | None = Field(default=None, ge=0)
+    redis_ms: float | None = Field(default=None, ge=0)
 
 
 def _latency_ms(start: float) -> float:
@@ -49,7 +54,6 @@ async def _probe(
 ) -> ComponentHealth:
     """Execute one dependency probe without allowing it to block the API."""
 
-    del name
     start = asyncio.get_running_loop().time()
     try:
         await asyncio.wait_for(operation(), timeout=timeout)
@@ -57,22 +61,26 @@ async def _probe(
         return ComponentHealth(
             status="unhealthy",
             latency_ms=_latency_ms(start),
-            detail="health probe timed out",
+            detail=f"{name} health probe timed out",
         )
     except Exception as error:  # noqa: BLE001 - health must report dependency errors
         return ComponentHealth(
             status="unhealthy",
             latency_ms=_latency_ms(start),
-            detail=type(error).__name__,
+            detail=f"{name} connectivity check failed: {type(error).__name__}",
         )
-    return ComponentHealth(status="healthy", latency_ms=_latency_ms(start))
+    return ComponentHealth(
+        status="healthy",
+        latency_ms=_latency_ms(start),
+        detail=f"{name} connectivity check passed",
+    )
 
 
 async def _probe_postgres(settings: Settings) -> ComponentHealth:
     """Open and close a PostgreSQL connection using the configured URL."""
 
     if not settings.database_url:
-        return ComponentHealth(status="not_configured")
+        return ComponentHealth(status="not_configured", detail="not configured")
 
     url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
 
@@ -92,7 +100,7 @@ async def _probe_neo4j(settings: Settings) -> ComponentHealth:
         settings.neo4j_password,
     )
     if not uri or not user or not password:
-        return ComponentHealth(status="not_configured")
+        return ComponentHealth(status="not_configured", detail="not configured")
     secret = password.get_secret_value()
 
     async def operation() -> None:
@@ -113,7 +121,7 @@ async def _probe_redis(settings: Settings) -> ComponentHealth:
 
     url = settings.redis_url
     if not url:
-        return ComponentHealth(status="not_configured")
+        return ComponentHealth(status="not_configured", detail="not configured")
 
     async def operation() -> None:
         client = create_redis_client(url)
@@ -140,20 +148,39 @@ async def health(request: Request) -> HealthResponse:
         "neo4j": neo4j,
         "redis": redis_status,
     }
+    latency_fields = {
+        "postgres_ms": postgres.latency_ms,
+        "neo4j_ms": neo4j.latency_ms,
+        "redis_ms": redis_status.latency_ms,
+    }
     healthy = all(component.status == "healthy" for component in components.values())
+    _LOGGER.info(
+        "health_check",
+        extra={
+            "event": "health_check",
+            "status": "ok" if healthy else "degraded",
+            **latency_fields,
+            "component_statuses": {
+                key: value.status for key, value in components.items()
+            },
+        },
+    )
     if not healthy:
         raise ApiError(
             503,
             "SERVICE_UNAVAILABLE",
             "One or more critical stores are unavailable.",
             {
+                "status": "degraded",
                 "components": {
                     key: value.model_dump() for key, value in components.items()
-                }
+                },
+                **latency_fields,
             },
         )
     return HealthResponse(
-        status="ok" if healthy else "degraded",
+        status="ok",
         version="0.1.0",
         components=components,
+        **latency_fields,
     )

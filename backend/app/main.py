@@ -17,6 +17,7 @@ from app.api.v1.settings import router as settings_router
 from app.core.auth import ClerkVerifier, get_current_user
 from app.core.config import Settings, get_settings
 from app.core.errors import install_error_handlers
+from app.core.logging import RequestLoggingMiddleware, configure_logging
 from app.core.rate_limit import enforce_rate_limit
 from app.db.neo4j import create_neo4j_driver, initialize_schema
 from app.db.redis import create_redis_client
@@ -112,7 +113,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.state.settings = settings or get_settings()
     application.state.migration_tasks = set()
+    configure_logging(application.state.settings)
     install_error_handlers(application)
+    application.add_middleware(RequestLoggingMiddleware)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=application.state.settings.cors_origins,
@@ -124,7 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "Last-Event-ID",
             "X-Request-ID",
         ],
-        expose_headers=["Retry-After"],
+        expose_headers=["Retry-After", "X-Request-ID"],
     )
     application.include_router(health_router, prefix="/api/v1")
     protected = APIRouter(

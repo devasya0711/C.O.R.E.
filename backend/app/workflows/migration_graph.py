@@ -320,6 +320,54 @@ async def _publish(dependencies: MigrationDependencies, event: MigrationEvent) -
     raise MigrationWorkflowError("Injected migration event publisher is invalid.")
 
 
+async def _observed_agent(
+    agent: str,
+    state: MigrationState,
+    operation: Callable[[], Awaitable[MigrationState]],
+) -> MigrationState:
+    """Run one workflow node and emit structured latency/retry telemetry."""
+
+    started = asyncio.get_running_loop().time()
+    retry_count = state.get("retry_count", 0)
+    retry_value = retry_count if type(retry_count) is int else 0
+    try:
+        result = await operation()
+    except BaseException as error:
+        if _is_control_flow_error(error):
+            raise
+        _LOGGER.exception(
+            "agent_execution_failed",
+            extra={
+                "event": "agent_execution",
+                "agent": agent,
+                "latency_ms": round(
+                    (asyncio.get_running_loop().time() - started) * 1000, 2
+                ),
+                "retry_count": retry_value,
+                "crag_retry_count": retry_value,
+                "status": "failed",
+            },
+        )
+        raise
+    result_retry_count = result.get("retry_count", retry_value)
+    if type(result_retry_count) is not int:
+        result_retry_count = retry_value
+    _LOGGER.info(
+        "agent_execution",
+        extra={
+            "event": "agent_execution",
+            "agent": agent,
+            "latency_ms": round(
+                (asyncio.get_running_loop().time() - started) * 1000, 2
+            ),
+            "retry_count": result_retry_count,
+            "crag_retry_count": result_retry_count,
+            "status": "failed" if result.get("workflow_error", False) else "completed",
+        },
+    )
+    return result
+
+
 async def _session_get(
     session: object, model: type[object], key: UUID
 ) -> object | None:
@@ -849,6 +897,8 @@ async def _crag_node(
                 "missing_file_count": len(missing),
                 "reason_count": len(reasons),
                 "reasons": _crag_event_reasons(reasons),
+                "retry_count": state.get("retry_count", 0),
+                "crag_retry_count": state.get("retry_count", 0),
             },
         )
         return output
@@ -1211,31 +1261,67 @@ def _build_graph(
     dependencies.resolved_sandbox()
 
     async def retrieve_node(state: MigrationState) -> MigrationState:
-        return await _retrieve_node(dependencies, state)
+        return await _observed_agent(
+            "migration_context_retrieval",
+            state,
+            lambda: _retrieve_node(dependencies, state),
+        )
 
     async def crag_node(state: MigrationState) -> MigrationState:
-        return await _crag_node(dependencies, state)
+        return await _observed_agent(
+            "crag_evaluator",
+            state,
+            lambda: _crag_node(dependencies, state),
+        )
 
     async def augment_node(state: MigrationState) -> MigrationState:
-        return await _augment_node(dependencies, state)
+        return await _observed_agent(
+            "crag_source_augmentation",
+            state,
+            lambda: _augment_node(dependencies, state),
+        )
 
     async def coder_node(state: MigrationState) -> MigrationState:
-        return await _coder_node(dependencies, state)
+        return await _observed_agent(
+            "refactor_coder",
+            state,
+            lambda: _coder_node(dependencies, state),
+        )
 
     async def sandbox_node(state: MigrationState) -> MigrationState:
-        return await _sandbox_node(dependencies, state)
+        return await _observed_agent(
+            "pytest_sandbox",
+            state,
+            lambda: _sandbox_node(dependencies, state),
+        )
 
     async def github_node(state: MigrationState) -> MigrationState:
-        return await _github_node(dependencies, state)
+        return await _observed_agent(
+            "github_pr_publisher",
+            state,
+            lambda: _github_node(dependencies, state),
+        )
 
     async def complete_node(state: MigrationState) -> MigrationState:
-        return await _complete_node(dependencies, state)
+        return await _observed_agent(
+            "migration_completion",
+            state,
+            lambda: _complete_node(dependencies, state),
+        )
 
     async def human_review_node(state: MigrationState) -> MigrationState:
-        return await _human_review_node(dependencies, state)
+        return await _observed_agent(
+            "migration_human_review",
+            state,
+            lambda: _human_review_node(dependencies, state),
+        )
 
     async def failed_node(state: MigrationState) -> MigrationState:
-        return await _mark_failed_node(dependencies, state)
+        return await _observed_agent(
+            "migration_failure",
+            state,
+            lambda: _mark_failed_node(dependencies, state),
+        )
 
     graph = StateGraph(MigrationState)
     graph.add_node("retrieve_seam_context", retrieve_node)

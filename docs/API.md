@@ -32,7 +32,12 @@ internal `user_id`.
 ### **2.1 System & Auth**
 
 -   **GET /api/v1/health** — Checks PostgreSQL, Neo4j, and Redis
-    > connectivity. Returns 200 OK.
+    > connectivity. Returns 200 only when all required stores are healthy.
+    > The response includes `components` entries with `status`, `detail`, and
+    > `latency_ms`, plus `postgres_ms`, `neo4j_ms`, and `redis_ms`. If any
+    > required store is missing or unreachable, it returns `503
+    > SERVICE_UNAVAILABLE` with the same component diagnostics in the standard
+    > error `details` object.
 
 -   **PUT /api/v1/settings/github-token** — Encrypts and saves a user's
     > GitHub PAT. Request body: `{ "token": "ghp_..." }`. Response:
