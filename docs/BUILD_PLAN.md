@@ -694,6 +694,19 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
   verified, committed, and pushed. If no failure exists, record a clean
   diagnostic rather than inventing a change.
 
+#### Batch 8 diagnostic record
+
+- No reproducible FastAPI, LangGraph, Neo4j, Docker, or Next.js application
+  failure remains after the complete Batch 7 suite: 373 backend tests and all
+  frontend typecheck, lint, unit, smoke, and production-build checks pass.
+- The remaining gaps are environmental rather than unexplained code failures:
+  Docker is not installed in this workspace, and live PostgreSQL, Redis, and
+  Neo4j integration tests are skipped unless their `TEST_*` service URLs are
+  provided. These limitations are recorded rather than masked with mocks.
+- No Batch 8 production-code change is justified by the available evidence;
+  security, review, deployment, and monitoring work proceeds as the next
+  independently verifiable hardening batches.
+
 ### Batch 9 — Prompt 16: Security Audit & Hardening
 
 - **Goal:** Audit and remediate Cypher/SQL injection, sandbox escapes,
