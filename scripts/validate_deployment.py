@@ -131,6 +131,16 @@ def validate_sandbox_configuration() -> None:
 def validate_ci_and_readme() -> None:
     ci = _read(".github/workflows/ci.yml")
     _require(ci, r"scripts/validate_deployment\.py", "CI static deployment check")
+    _require(
+        ci,
+        r"SANDBOX_WORKSPACE_ROOT: \$\{\{ runner\.temp \}\}/core-sandbox-workspaces",
+        "CI sandbox workspace root",
+    )
+    _require(
+        ci,
+        r'mkdir -p "\$SANDBOX_WORKSPACE_ROOT"',
+        "CI sandbox workspace preparation",
+    )
     _require(ci, r"docker compose config --quiet", "CI Compose validation")
     _require(ci, r"docker compose build backend frontend sandbox", "CI image builds")
 

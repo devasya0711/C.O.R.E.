@@ -95,10 +95,13 @@ jobs:
       NEO4J_PASSWORD: ci-neo4j-password
       DATABASE_URL: postgresql+asyncpg://core_user:ci-postgres-password@postgres:5432/core_db
       DOCKER_GID: "0"
+      SANDBOX_WORKSPACE_ROOT: ${{ runner.temp }}/core-sandbox-workspaces
     steps:
       - uses: actions/checkout@v4
       - name: Validate deployment descriptors
         run: python scripts/validate_deployment.py
+      - name: Prepare shared sandbox workspace
+        run: mkdir -p "$SANDBOX_WORKSPACE_ROOT" && chmod 0770 "$SANDBOX_WORKSPACE_ROOT"
       - name: Validate Compose configuration
         run: docker compose config --quiet
       - name: Build application and sandbox images
