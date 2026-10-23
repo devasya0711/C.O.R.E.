@@ -869,17 +869,23 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - **Completion:** Publish a launch verdict of `READY`, `READY WITH WARNINGS`,
   or `NOT READY`, with test results and the final verification checklist.
 
-#### Batch 13 final audit record — October 22, 2026
+#### Batch 13 final audit record — October 23, 2026
 
 - **Verdict: NOT READY.** The portable implementation and deterministic
   regression suites are healthy, but production launch criteria are not fully
   verifiable in this workspace.
-- Backend verification after the final-audit fixes: **412 passed, 104 skipped,
+- Backend verification after the final-audit fixes: **415 passed, 104 skipped,
   1 warning** under Python 3.12. The skips require disposable PostgreSQL,
   Redis, or Neo4j services through the documented `TEST_*` variables.
 - Frontend verification passed with the maintained Next.js 15 line: typecheck,
   lint, unit tests (**11 passed**), production build, and production-auth smoke
   tests (**3 passed**). A Clerk deprecation warning remains.
+- `npm ci --ignore-scripts` completed reproducibly, and
+  `npm audit --omit=dev --audit-level=high` reports **0 vulnerabilities** after
+  pinning PostCSS `8.5.31` for the Next.js 15-compatible dependency graph.
+- Full npm audit still reports development-only Tailwind CSS 3 transitive
+  advisories. The automated fix requires the breaking Tailwind CSS 4 upgrade;
+  it is explicitly deferred until the styling migration is tested.
 - Deployment descriptor validation, strict backend mypy, Ruff, Ruff format, and
   `git diff --check` passed. Docker image builds, Compose startup, Alembic
   cold-start, Docker sandbox execution, and healthchecks could not run because
@@ -887,14 +893,13 @@ fixtures; local store writes, GDS, NetworkX, and Cypher are real.
 - The final Docker sandbox audit fixed daemon-visible workspace mapping, named
   container cleanup, resource caps, nofile limits, and non-root UID mapping.
   These changes still require a live Docker verification.
-- The frontend dependency audit reports **0 vulnerabilities** for the attempted
-  Next.js 16 upgrade, but that upgrade breaks the existing auth test harness and
-  requires broader migration work. The maintained Next.js 15 lockfile retains
-  one high and one moderate PostCSS advisory; this is a launch warning/blocker
-  requiring a planned dependency upgrade or explicit risk acceptance.
-- Current local history contains the verified batch commits, but the branch is
-  not synchronized with GitHub until authentication is restored and the local
-  commits are pushed. This also prevents remote CI confirmation.
+- The attempted Next.js 16 upgrade remains reverted because it broke the
+  existing authentication test harness. The maintained Next.js 15 line now has
+  a clean production dependency audit through the PostCSS `8.5.31` pin.
+- The previous final-audit history was readable and synchronized with the
+  remote at `048d3cf`; the current package-lock and documentation changes are
+  intentionally unpushed for the user to push. Remote CI confirmation remains
+  pending for this final commit.
 
 The complete checklist and evidence are summarized in `docs/FINAL_AUDIT.md`.
 

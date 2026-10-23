@@ -1,14 +1,18 @@
 # C.O.R.E. Final Production Audit
 
-**Audit date:** October 22, 2026
+**Audit date:** October 23, 2026
 **Verdict:** **NOT READY**
 
 ## What passed locally
 
-- Backend and deterministic fixture suite: **412 passed, 104 skipped, 1
+- Backend and deterministic fixture suite: **415 passed, 104 skipped, 1
   warning**, using the repository's Python 3.12 environment.
 - Frontend typecheck, ESLint, unit tests (**11 passed**), production build, and
   production-auth smoke tests (**3 passed**).
+- Frontend production dependency audit: **0 vulnerabilities** with
+  `npm audit --omit=dev --audit-level=high`. The Next.js 15-compatible PostCSS
+  dependency is pinned to patched `8.5.31` for the direct and transitive build
+  graph.
 - Strict backend mypy, Ruff, Ruff format, deployment descriptor validation, and
   `git diff --check`.
 - Security boundaries: parameterized SQL/Cypher, tenant ownership checks,
@@ -21,21 +25,24 @@
 
 ## Blocking or warning gaps
 
-1. **Remote synchronization is incomplete.** The local verified commits are
-   ahead of `origin/main`, but this environment has no GitHub authentication.
-   `gh auth status` reports no logged-in host, and both HTTPS/SSH push paths are
-   unavailable. Remote CI therefore has not confirmed the final history.
+1. **The final local commit still needs to be pushed by the user.** Before this
+   audit update, `git ls-remote origin refs/heads/main` matched the previously
+   committed history at `048d3cf`. This environment has no GitHub write
+   authentication (`gh auth status` reports no logged-in host), so the final
+   package-lock and audit-document commit is intentionally left for the user to
+   push. Remote CI has not confirmed that final commit.
 2. **Live infrastructure is unavailable.** Docker is not installed. PostgreSQL,
    Redis, and Neo4j test services are not configured. Consequently, Compose
    cold-start, Alembic boot, Docker sandbox execution/cleanup, graph-store
    integration, backup/restore drills, and the authenticated end-to-end product
    flow are not claimed as verified.
-3. **Frontend dependency advisory remains on the maintained line.** The
-   Next.js 15 lockfile contains one high and one moderate PostCSS advisory. A
-   trial Next.js 16 upgrade removed the audit finding but broke the existing
-   authentication test harness and requires migration work, so it was not left
-   in the repository with failing checks. Schedule the Next.js upgrade or
-   record an explicit security risk acceptance before launch.
+3. **Development-only dependency advisories remain.** The full npm audit reports
+   two moderate and seven high advisories through Tailwind CSS 3's transitive
+   build tooling (`braces` and `postcss-selector-parser`). The available forced
+   remediation upgrades Tailwind CSS to 4 and is a breaking change. The
+   production dependency audit is clean after pinning PostCSS 8.5.31; schedule
+   the Tailwind 4 migration separately rather than introducing an unverified
+   styling migration into this release.
 4. **External credentials are absent.** No live Clerk session, OpenAI key,
    GitHub PAT, or hosted observability sink was available for final-flow
    verification.
@@ -78,6 +85,7 @@ sandbox result, and GitHub PR payload with real authenticated credentials.
 ## Release decision
 
 C.O.R.E. is **not approved for production launch yet**. The implementation is
-substantially complete and locally verified, but the missing pushed history,
-live infrastructure, external credentials, Docker execution, and unresolved
-frontend advisory prevent an honest `READY` verdict.
+substantially complete and locally verified, but the final commit still needs
+to be pushed, live infrastructure and external credentials are unavailable,
+and Docker execution has not been exercised. These gaps prevent an honest
+`READY` verdict even though the production dependency audit is clean.

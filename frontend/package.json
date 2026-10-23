@@ -11,6 +11,9 @@
     "test": "tsc --project tests/tsconfig.json && node --test tests/auth.test.mjs tests/migration-sse.test.mjs",
     "test:smoke": "node --test tests/production-auth.test.mjs"
   },
+  "overrides": {
+    "postcss": "$postcss"
+  },
   "dependencies": {
     "@clerk/nextjs": "^7.9.17",
     "@xyflow/react": "^12.8.5",
@@ -26,7 +29,7 @@
     "autoprefixer": "^10.4.21",
     "eslint": "^9.25.0",
     "eslint-config-next": "^15.4.0",
-    "postcss": "^8.5.3",
+    "postcss": "8.5.31",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3"
   }
